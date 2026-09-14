@@ -110,6 +110,29 @@ PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p myproj --to b
 `~/.gitconfig` был свой `alias.xfer`, после установки он перестанет
 срабатывать при вызове `git xfer`. Проверить: `git config --get alias.xfer`.
 
+### Не работает — что проверить
+
+**`git: 'xfer' is not a git command`** — утилиты нет в `PATH`. Из просто
+скачанного клона `git xfer` работать не может: git ищет в `PATH`
+исполняемый файл `git-xfer`. Поставьте (`uv tool install <клон>`) или
+положите симлинк, как выше. До этого зовите из каталога клона:
+`python3 -m gitxfer …` или `./bin/git-xfer …`.
+
+**`command -v git-xfer` ничего не печатает** — симлинк создан, но
+`~/.local/bin` не в `PATH`. Проверить: `echo $PATH | tr : '\n' | grep local/bin`.
+
+**`attempted relative import with no known parent package`** — запустили
+файл пакета напрямую (`python3 gitxfer/cli.py`). Так нельзя; см. способы
+выше. Свежие версии на это отвечают подсказкой вместо трейсбека.
+
+**`нужен Python 3.11 или новее`** — `python3` в `PATH` слишком старый
+(на macOS системный обычно 3.9). Ставьте через `uv`/`pipx`, они
+фиксируют интерпретатор, либо зовите `python3.11 -m gitxfer …`.
+
+**Что-то упало непонятно** — есть журнал: путь покажет `git-xfer status`,
+по умолчанию `~/.local/state/git-xfer/git-xfer.log`. Там каждый вызов git
+с кодом возврата и полный трейсбек последней ошибки.
+
 ## Конфиг
 
 Штатное место — `~/.config/git-xfer/config.toml` (учитывается
