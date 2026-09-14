@@ -6,6 +6,16 @@ import argparse
 import sys
 from pathlib import Path
 
+if __package__ in (None, ""):  # запустили файлом, а не как часть пакета
+    import sys as _sys
+
+    _sys.exit(
+        "git-xfer: этот файл — часть пакета, отдельно он не запускается.\n"
+        "  из клона:       python3 -m gitxfer ...\n"
+        "  или лаунчером:  ./bin/git-xfer ...\n"
+        "  после установки: git-xfer ..."
+    )
+
 from . import __version__, logbook
 from .config import (
     DEFAULT_DEDUP_WINDOW,
@@ -43,7 +53,7 @@ from .errors import (
 from .gitcmd import Git
 from .plan import dry_run
 from .preflight import head_sha, run_preflight, stale_xfer_refs
-from .select import choose, legend, parse_selection, render_rows, require_tty
+from .picker import choose, legend, parse_selection, render_rows, require_tty
 from .state import State, state_path
 from .transfer import Options, abort, resume, start
 

@@ -515,7 +515,7 @@ git -C <TARGET> -c protocol.file.allow=always \
 во временном каталоге и удаляется в конце:
 
 ```bash
-sh tests/smoke.sh          # 101 проверка
+sh tests/smoke.sh          # 122 проверки
 KEEP=1 sh tests/smoke.sh   # оставить стенд для разбора
 ```
 

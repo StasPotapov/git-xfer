@@ -409,6 +409,37 @@ for V in ask mechanical auto; do
   grep -q "\`$V\`" "$SKILL" && ok "скилл знает политику $V" || bad "скилл знает политику $V"
 done
 
+echo "== 25. все способы запуска =="
+OUT=$(cd "$ROOT" && PYTHONPATH="$ROOT" python3 -m gitxfer --version 2>&1); check 0 $? "python3 -m gitxfer"
+has "git-xfer" "$OUT" "и печатает версию"
+OUT=$("$ROOT/bin/git-xfer" --version 2>&1); check 0 $? "лаунчер bin/git-xfer"
+OUT=$(python3 "$ROOT/gitxfer/__main__.py" --version 2>&1); check 0 $? "__main__.py файлом"
+has "git-xfer" "$OUT" "и он тоже печатает версию"
+OUT=$(python3 "$ROOT/gitxfer/cli.py" --version 2>&1); CODE=$?
+check 1 $CODE "cli.py файлом — внятный отказ, а не трейсбек"
+hasnt "Traceback" "$OUT" "без трейсбека"
+has "python3 -m gitxfer" "$OUT" "и сказано, как запускать"
+
+echo "== 26. ни один модуль не затеняет стандартную библиотеку =="
+CLASH=$(PYTHONPATH="$ROOT" python3 -c '
+import sys, pathlib
+mods = {p.stem for p in pathlib.Path("'"$ROOT"'/gitxfer").glob("*.py")} - {"__init__", "__main__"}
+print(",".join(sorted(mods & sys.stdlib_module_names)) or "нет")')
+check "нет" "$CLASH" "имена модулей не совпадают со стандартными"
+# Каталог пакета в sys.path не должен ломать subprocess.
+OUT=$(cd "$WORK" && PYTHONPATH="$ROOT/gitxfer:$ROOT" python3 -m gitxfer --version 2>&1); CODE=$?
+check 0 $CODE "пакет работает, даже если его каталог попал в sys.path"
+
+echo "== 27. все подкоманды отвечают на --help =="
+for CMD in init doctor sync list plan apply continue skip abort status cleanup; do
+  OUT=$(PYTHONPATH="$ROOT" python3 -m gitxfer "$CMD" --help 2>&1); CODE=$?
+  if [ $CODE -eq 0 ] && printf '%s\n' "$OUT" | grep -q "usage: git-xfer $CMD"; then
+    ok "$CMD --help"
+  else
+    bad "$CMD --help (код $CODE)"
+  fi
+done
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]
