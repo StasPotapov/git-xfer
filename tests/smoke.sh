@@ -364,6 +364,51 @@ else
   ok "в примере не осталось вызовов через пробел"
 fi
 
+echo "== 23. политика разбора конфликтов =="
+POL="$WORK/policy.toml"
+for V in ask mechanical auto; do
+  cat > "$POL" <<EOF
+[agent]
+resolve_conflicts = "$V"
+
+[profiles.t]
+a = "$WORK/a"
+b = "$WORK/b"
+branch = "master"
+EOF
+  OUT=$(xfer status --config "$POL" -p t --to b 2>&1)
+  has "Конфликты: $V" "$OUT" "status показывает политику $V"
+done
+cat > "$POL" <<EOF
+[agent]
+resolve_conflicts = "yolo"
+
+[profiles.t]
+a = "$WORK/a"
+b = "$WORK/b"
+branch = "master"
+EOF
+OUT=$(xfer status --config "$POL" -p t --to b 2>&1); CODE=$?
+check 1 $CODE "опечатка в политике — ошибка, а не молчание"
+has "resolve_conflicts" "$OUT" "и названа причина"
+DEFAULT=$(xfer status -p t --to b 2>&1 | grep "^Конфликты:")
+has "mechanical" "$DEFAULT" "по умолчанию mechanical"
+
+echo "== 24. скилл на месте и описан =="
+SKILL="$ROOT/skills/git-xfer/SKILL.md"
+if [ -f "$SKILL" ]; then ok "SKILL.md лежит в репозитории"; else bad "SKILL.md лежит в репозитории"; fi
+head -1 "$SKILL" | grep -q -- "---" && ok "frontmatter на месте" || bad "frontmatter на месте"
+grep -q "^name: git-xfer$" "$SKILL" && ok "имя скилла задано" || bad "имя скилла задано"
+grep -q "^description: " "$SKILL" && ok "описание задано" || bad "описание задано"
+if grep -q "git xfer " "$SKILL"; then
+  bad "в скилле нет вызовов через пробел"
+else
+  ok "в скилле нет вызовов через пробел"
+fi
+for V in ask mechanical auto; do
+  grep -q "\`$V\`" "$SKILL" && ok "скилл знает политику $V" || bad "скилл знает политику $V"
+done
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]

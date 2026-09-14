@@ -9,6 +9,7 @@ from pathlib import Path
 from . import __version__, logbook
 from .config import (
     DEFAULT_DEDUP_WINDOW,
+    DEFAULT_RESOLVE,
     DEFAULT_PATCHID_WINDOW,
     DEFAULT_SCAN_LIMIT,
     Profile,
@@ -529,6 +530,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(describe(profile))
     print(f"State:   {state_path(profile.target)}")
     print(f"Журнал:  {logbook.path() or 'выключен'}")
+    policy = context.config.resolve_conflicts if context.config else DEFAULT_RESOLVE
+    print(f"Конфликты: {policy} (политика для скилла, не для самой утилиты)")
     if not progress:
         print("Незавершённого переноса нет")
         return EXIT_OK

@@ -26,6 +26,12 @@ DEFAULT_DEDUP_WINDOW = 5000
 #: результат кэшируется в state, так что платим один раз.
 DEFAULT_PATCHID_WINDOW = 1000
 
+#: Насколько самостоятельно агент разбирает конфликты. Читает это скилл,
+#: сама утилита ничего по ней не делает — но проверяет значение и
+#: показывает его в `status`, чтобы опечатка не оказалась молчаливой.
+RESOLVE_POLICIES = ("ask", "mechanical", "auto")
+DEFAULT_RESOLVE = "mechanical"
+
 _REF_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 CONFIG_TEMPLATE = """\
@@ -54,6 +60,19 @@ patchid_window = 1000
 # Посмотреть путь: git-xfer status
 log = true
 # log_file = "~/.local/state/git-xfer/git-xfer.log"
+
+[agent]
+# Насколько самостоятельно агент (скилл git-xfer для Claude Code) разбирает
+# конфликты. Читает это скилл; сама утилита по ней ничего не делает, только
+# проверяет значение и показывает его в `git-xfer status`.
+#   "ask"        — не правит ничего сам, только показывает суть и предлагает
+#   "mechanical" — сам чинит механические конфликты (импорты, соседние
+#                  строки, форматирование, сгенерённое) и показывает, что
+#                  сделал; смысловые обязательно выносит на решение человеку
+#   "auto"       — разбирает всё сам, включая смысловые, и отчитывается
+#                  постфактум. Ошибка тут уезжает коммитом в рабочий
+#                  репозиторий, так что включайте осознанно
+resolve_conflicts = "mechanical"
 
 # [profiles.myproj]
 # a = "/path/to/repo-a"
@@ -179,6 +198,8 @@ class Config:
     profiles: dict[str, Pair]
     log_enabled: bool = True
     log_file: Path | None = None
+    #: Политика для скилла git-xfer, не для самой утилиты.
+    resolve_conflicts: str = DEFAULT_RESOLVE
 
     def pair(self, name: str | None) -> Pair:
         if not name:
@@ -335,6 +356,17 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("[defaults]: 'log_file' должен быть непустой строкой")
     log_file = Path(raw_log_file).expanduser() if raw_log_file else None
 
+    agent = data.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise ConfigError(f"{path}: секция [agent] должна быть таблицей")
+    resolve = agent.get("resolve_conflicts", DEFAULT_RESOLVE)
+    if resolve not in RESOLVE_POLICIES:
+        raise ConfigError(
+            "[agent]: 'resolve_conflicts' должен быть одним из "
+            + ", ".join(repr(x) for x in RESOLVE_POLICIES)
+            + f", а не {resolve!r}"
+        )
+
     scan_limit = _require_int(defaults, "scan_limit", "[defaults]", DEFAULT_SCAN_LIMIT)
     dedup = _require_int(defaults, "dedup_window", "[defaults]", DEFAULT_DEDUP_WINDOW)
     window = _require_int(defaults, "patchid_window", "[defaults]", DEFAULT_PATCHID_WINDOW)
@@ -363,6 +395,7 @@ def load_config(path: Path | None = None) -> Config:
         profiles=profiles,
         log_enabled=log_enabled,
         log_file=log_file,
+        resolve_conflicts=resolve,
     )
 
 
