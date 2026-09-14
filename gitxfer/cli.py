@@ -231,7 +231,7 @@ class Context:
             # Подтянуть их молча нельзя — это запись в репозиторий.
             raise XferError(
                 f"объектов источника нет ({self.profile.ref}), а --dry-run не даёт их "
-                f"подтянуть. Выполните сначала: git xfer sync -p {self.profile.name}"
+                f"подтянуть. Выполните сначала: git-xfer sync -p {self.profile.name}"
             )
         eprint(f"Объекты источника ещё не перенесены, выполняю sync ({self.profile.ref})")
         sync(self.target, self.profile)
@@ -320,7 +320,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     path, created = write_template(args.config, force=args.force)
     if created:
         print(f"Создан шаблон конфига: {path}")
-        print("Опишите профили и запустите: git xfer doctor -p <профиль>")
+        print("Опишите профили и запустите: git-xfer doctor -p <профиль>")
     else:
         print(f"Конфиг уже существует: {path} (перезаписать — init --force)")
     return EXIT_OK
@@ -429,7 +429,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if args.dry_run:
         # Под --dry-run cherry-pick не выполняется, HEAD не двигается,
         # и каждый коммит выглядел бы пустым. Сухой прогон — это plan.
-        raise XferError("для сухого прогона есть отдельная подкоманда: git xfer plan")
+        raise XferError("для сухого прогона есть отдельная подкоманда: git-xfer plan")
     context = Context(args)
     # Проверки раньше fetch: незачем тащить объекты в репозиторий,
     # который мы тут же признаем непригодным.
@@ -474,7 +474,7 @@ def _summary(outcome) -> int:
     )
     if outcome.conflict:
         print(f"Остановлено на {outcome.conflict[:12]}, в очереди ещё {len(outcome.remaining)}")
-        print("Дальше: git xfer continue | skip | abort")
+        print("Дальше: git-xfer continue | skip | abort")
     return outcome.exit_code
 
 
@@ -516,7 +516,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  HEAD ожидаемый: {progress.expected_head[:12]}, фактический: {head[:12]}")
     if head != progress.expected_head:
         print("  ! HEAD не там, где мы его оставили — перенос трогали руками")
-        print("    забыть незавершённую серию: git xfer cleanup --state")
+        print("    забыть незавершённую серию: git-xfer cleanup --state")
     return EXIT_OK
 
 
@@ -610,7 +610,7 @@ def _add_common(parser: argparse.ArgumentParser, *, after_command: bool) -> None
     """Флаги, работающие и до подкоманды, и после неё.
 
     В копии для подкоманды дефолт — SUPPRESS: без него argparse затёр бы
-    значение, разобранное головным парсером, и `git xfer --config X init`
+    значение, разобранное головным парсером, и `git-xfer --config X init`
     перестал бы работать.
     """
     hidden = argparse.SUPPRESS
@@ -651,7 +651,7 @@ def _add_common(parser: argparse.ArgumentParser, *, after_command: bool) -> None
 
 def build_parser() -> argparse.ArgumentParser:
     parser = Parser(
-        prog="git xfer",
+        prog="git-xfer",
         description="Перенос коммитов между несвязанными git-репозиториями.",
     )
     parser.add_argument("--version", action="version", version=f"git-xfer {__version__}")

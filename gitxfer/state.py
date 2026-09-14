@@ -100,12 +100,12 @@ class State:
         except (OSError, json.JSONDecodeError) as exc:
             raise StateError(
                 f"state повреждён: {path} — {exc}\n"
-                "Удалите файл или выполните: git xfer cleanup --state"
+                "Удалите файл или выполните: git-xfer cleanup --state"
             ) from None
         if data.get("version") != STATE_VERSION:
             raise StateError(
                 f"state {path} записан версией {data.get('version')!r}, "
-                f"а ожидается {STATE_VERSION}. Выполните: git xfer cleanup --state"
+                f"а ожидается {STATE_VERSION}. Выполните: git-xfer cleanup --state"
             )
         progress = data.get("in_progress")
         return cls(

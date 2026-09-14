@@ -157,7 +157,7 @@ has "−" "$OUT" "перенесённое опознано и с обратно
 echo "== 11. --dry-run и коды выхода =="
 OUT=$(xfer -n apply -p t --to b --commits 1 --yes 2>&1); CODE=$?
 check 1 $CODE "apply под --dry-run отказывается"
-has "git xfer plan" "$OUT" "и отправляет в plan"
+has "git-xfer plan" "$OUT" "и отправляет в plan"
 BEFORE=$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)
 OUT=$(xfer -n cleanup -p t --to b 2>&1)
 hasnt "^Удалён" "$OUT" "cleanup под --dry-run не рапортует об удалении"
@@ -165,7 +165,7 @@ check "$BEFORE" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer
 xfer cleanup -p t --to b >/dev/null 2>&1
 OUT=$(xfer -n plan -p t --to b --commits 1 2>&1); CODE=$?
 check 1 $CODE "plan под --dry-run без объектов — внятная ошибка"
-has "git xfer sync" "$OUT" "и говорит, что выполнить"
+has "git-xfer sync" "$OUT" "и говорит, что выполнить"
 xfer такой-подкоманды-нет >/dev/null 2>&1
 check 1 $? "ошибка разбора аргументов не занимает код 2"
 

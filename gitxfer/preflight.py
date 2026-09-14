@@ -259,7 +259,7 @@ def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: 
         report.add(
             "refs/xfer",
             WARN,
-            f"остались от прошлых прогонов: {', '.join(stale)} (git xfer cleanup)",
+            f"остались от прошлых прогонов: {', '.join(stale)} (git-xfer cleanup)",
         )
 
 

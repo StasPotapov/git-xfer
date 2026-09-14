@@ -155,7 +155,7 @@ def _drain(
             logbook.warn(
                 "конфликт на %s; в очереди осталось %d", sha, len(progress.queue)
             )
-            report("  конфликт — разрешите его и выполните: git xfer continue")
+            report("  конфликт — разрешите его и выполните: git-xfer continue")
             report(result.stdout.strip() or result.stderr.strip())
             return outcome
         if status == FAILED:
@@ -209,7 +209,7 @@ def start(
     """Начать новую серию переноса."""
     if state.in_progress:
         raise StateError(
-            "есть незавершённый перенос. Закончите его: git xfer continue / skip / abort"
+            "есть незавершённый перенос. Закончите его: git-xfer continue / skip / abort"
         )
     head = head_sha(git)
     if not head:
@@ -248,7 +248,7 @@ def _drift_error(progress: Progress, head: str) -> StateError:
         "пока перенос стоял на паузе, HEAD ушёл не туда:\n"
         f"  оставляли {progress.expected_head[:12]}, сейчас {head[:12] or '—'}\n"
         "Гадать, что из этого перенос, мы не будем. Разберитесь руками; "
-        "забыть незавершённую серию: git xfer cleanup --state"
+        "забыть незавершённую серию: git-xfer cleanup --state"
     )
 
 
@@ -273,7 +273,7 @@ def _check_head(git: Git, progress: Progress) -> str:
         raise StateError(
             "HEAD сдвинулся с тех пор, как перенос встал на паузу:\n"
             f"  ожидали {progress.expected_head[:12]}, а сейчас {head[:12] or '—'}\n"
-            "Разберитесь руками; чтобы забыть незавершённую серию: git xfer cleanup --state"
+            "Разберитесь руками; чтобы забыть незавершённую серию: git-xfer cleanup --state"
         )
     return head
 

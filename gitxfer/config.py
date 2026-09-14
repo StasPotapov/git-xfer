@@ -51,7 +51,7 @@ patchid_window = 1000
 
 # Журнал прогонов: что запускалось, с каким кодом и где встало.
 # Лежит рядом со state, вне рабочих репозиториев, в git не попадает.
-# Посмотреть путь: git xfer status
+# Посмотреть путь: git-xfer status
 log = true
 # log_file = "~/.local/state/git-xfer/git-xfer.log"
 
@@ -315,7 +315,7 @@ def load_config(path: Path | None = None) -> Config:
     path = Path(path).expanduser() if path else config_path()
     if not path.exists():
         raise ConfigError(
-            f"конфиг не найден: {path}\nСоздайте шаблон командой: git xfer init"
+            f"конфиг не найден: {path}\nСоздайте шаблон командой: git-xfer init"
         )
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))

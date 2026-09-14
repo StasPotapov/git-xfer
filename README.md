@@ -10,7 +10,8 @@
 `git cherry-pick` не умеет ни показать, что уже перенесено, ни пережить
 конфликт в середине серии.
 
-`git-xfer` ставится как `git-xfer` в `$PATH`, поэтому доступен и как `git xfer`.
+Команда называется `git-xfer`. Через пробел — `git xfer` — тоже работает,
+но это не одно и то же; почему, [написано ниже](#git-xfer-или-git-xfer).
 
 ## Установка
 
@@ -36,19 +37,18 @@ python3 --version          # должно быть 3.11 или новее
 Дальше — любой из трёх способов. Обновление в любом случае одно: `git pull`
 в клоне, переустанавливать нечего.
 
-**1. Симлинк в `PATH` — и утилита работает как `git xfer`**
+**1. Симлинк в `PATH`**
 
 ```bash
 mkdir -p ~/.local/bin
 ln -s ~/tools/git-xfer/bin/git-xfer ~/.local/bin/git-xfer
 # если ~/.local/bin ещё не в PATH:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
-git xfer --version
+git-xfer --version
 ```
 
-Только так и получается подкоманда `git xfer`: git ищет в `PATH`
-исполняемый файл с именем `git-xfer`. Алиас шелла для этого не годится —
-git его не видит.
+Имя файла важно: именно по нему git находит подкоманду `git xfer`.
+Алиас шелла для этого не годится — git его не видит.
 
 **2. Обёртка вместо симлинка — когда нужен конкретный интерпретатор**
 
@@ -71,7 +71,35 @@ cd ~/tools/git-xfer && python3 -m gitxfer list -p myproj --to b
 PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p myproj --to b
 ```
 
-В этом варианте `git xfer` работать не будет — только `python3 -m gitxfer`.
+В этом варианте ни `git-xfer`, ни `git xfer` работать не будут — только
+`python3 -m gitxfer`.
+
+### `git-xfer` или `git xfer`
+
+Обе формы работают, но устроены по-разному, и это стоит знать.
+
+`git-xfer …` — обычный запуск программы из `PATH`. Ничем не
+перехватывается, ни от чего не зависит. В документации ниже используется
+именно она.
+
+`git xfer …` — удобство: увидев незнакомую подкоманду, git ищет в `PATH`
+исполняемый файл `git-xfer`. Порядок разрешения у git такой (проверено
+на месте, не по документации):
+
+```
+встроенная команда  →  внешняя git-<имя> из PATH  →  алиас
+```
+
+Отсюда два следствия. Первое: если git когда-нибудь заведёт собственную
+команду `xfer`, она окажется сильнее, и `git xfer` молча начнёт означать
+другое — а `git-xfer` останется собой. Сейчас такой команды у git нет
+(`git help -a` её не знает), и слово `xfer` в его терминологии не
+встречается, так что риск невелик — но он не нулевой, и платить за него
+нечем: просто зовите через дефис.
+
+Второе, менее очевидное: внешняя команда сильнее алиаса. Если у вас в
+`~/.gitconfig` был свой `alias.xfer`, после установки он перестанет
+срабатывать при вызове `git xfer`. Проверить: `git config --get alias.xfer`.
 
 ## Конфиг
 
@@ -112,15 +140,15 @@ b_branch = "stable"
 каталог создастся сам:
 
 ```bash
-git xfer init
+git-xfer init
 $EDITOR ~/.config/git-xfer/config.toml
 ```
 
 Свой путь, если не хочется трогать `~/.config`:
 
 ```bash
-git xfer init --config ~/tools/git-xfer.local.toml
-git xfer list --config ~/tools/git-xfer.local.toml -p myproj --to b
+git-xfer init --config ~/tools/git-xfer.local.toml
+git-xfer list --config ~/tools/git-xfer.local.toml -p myproj --to b
 ```
 
 `--config` работает и до подкоманды, и после. Чтобы не писать его каждый
@@ -142,8 +170,8 @@ cp ~/tools/git-xfer/config.example.toml ~/.config/git-xfer/config.toml
 Заводить профиль ради одного прогона по другой ветке не нужно:
 
 ```bash
-git xfer list -p myproj --to b -b feature/login    # обе стороны
-git xfer list -p myproj --to b --source-branch feature/login --target-branch integration
+git-xfer list -p myproj --to b -b feature/login    # обе стороны
+git-xfer list -p myproj --to b --source-branch feature/login --target-branch integration
 ```
 
 Указали только одну сторону — вторая берёт то же имя. У такого прогона
@@ -152,8 +180,8 @@ git xfer list -p myproj --to b --source-branch feature/login --target-branch int
 Можно и вовсе без конфига:
 
 ```bash
-git xfer list --source ~/dev/repo-a --target ~/dev/repo-b -b master
-git xfer apply --ask          # спросит репозитории и ветки
+git-xfer list --source ~/dev/repo-a --target ~/dev/repo-b -b master
+git-xfer apply --ask          # спросит репозитории и ветки
 ```
 
 ### Рабочее состояние и журнал
@@ -166,7 +194,7 @@ git xfer apply --ask          # спросит репозитории и вет�
 Если что-то пошло не так — смотреть туда:
 
 ```bash
-git xfer status -p myproj --to b     # покажет путь к журналу и к state
+git-xfer status -p myproj --to b     # покажет путь к журналу и к state
 tail -50 ~/.local/state/git-xfer/git-xfer.log
 ```
 
@@ -180,7 +208,7 @@ tail -50 ~/.local/state/git-xfer/git-xfer.log
 необходимости переключились на нужные ветки, и запускаете без аргументов:
 
 ```console
-$ git xfer apply
+$ git-xfer apply
 Профиль:
   1. myproj
      /Users/me/dev/repo-a ↔ /Users/me/dev/repo-b  (master)
@@ -227,7 +255,7 @@ $ git xfer apply
 Перенесённое утилита узнаёт с обеих сторон и по кругу не гоняет:
 
 ```console
-$ git xfer list -p myproj --to a
+$ git-xfer list -p myproj --to a
  1 − d3405fd 2024-02-05 Ann Source docs: переименование и правка
  2 − 7c72adc 2024-02-04 Ann Source chore: бинарный ассет
  3 + 758dd2e 2024-02-10 Bob Target target: правка app
@@ -239,22 +267,22 @@ $ git xfer list -p myproj --to a
 в скриптах и так же работает в терминале:
 
 ```bash
-git xfer list  -p myproj --to b
-git xfer apply -p myproj --to b --commits 3,4 --yes
-git xfer apply -p myproj --to a --commits 3 --yes
+git-xfer list  -p myproj --to b
+git-xfer apply -p myproj --to b --commits 3,4 --yes
+git-xfer apply -p myproj --to a --commits 3 --yes
 ```
 
 ### Полный цикл одной стороны
 
 ```bash
-git xfer doctor -p myproj --to b     # предполётные проверки
-git xfer sync   -p myproj --to b     # подтянуть объекты source → target
-git xfer list   -p myproj --to b     # таблица коммитов с пометками + / ≈ / −
-git xfer plan   -p myproj --to b -i  # сухой прогон: где будут конфликты
-git xfer apply  -p myproj --to b -i  # выбрать 1,3,5-7 → перенести
+git-xfer doctor -p myproj --to b     # предполётные проверки
+git-xfer sync   -p myproj --to b     # подтянуть объекты source → target
+git-xfer list   -p myproj --to b     # таблица коммитов с пометками + / ≈ / −
+git-xfer plan   -p myproj --to b -i  # сухой прогон: где будут конфликты
+git-xfer apply  -p myproj --to b -i  # выбрать 1,3,5-7 → перенести
 # конфликт → правите руками, git add ...
-git xfer continue -p myproj --to b   # доведёт коммит и докрутит очередь
-git xfer cleanup  -p myproj --to b   # убрать служебные ссылки
+git-xfer continue -p myproj --to b   # доведёт коммит и докрутит очередь
+git-xfer cleanup  -p myproj --to b   # убрать служебные ссылки
 ```
 
 `sync` выполняется сам, если объектов источника ещё нет, так что начинать
@@ -292,11 +320,11 @@ git xfer cleanup  -p myproj --to b   # убрать служебные ссыл�
 В скрипте интерактив недоступен — нужен явный выбор:
 
 ```bash
-git xfer apply -p myproj --to b --commits 1,3,5-7 --yes
-git xfer apply -p myproj --to b --sha 1a2b3c4 5d6e7f8 --yes
+git-xfer apply -p myproj --to b --commits 1,3,5-7 --yes
+git-xfer apply -p myproj --to b --sha 1a2b3c4 5d6e7f8 --yes
 ```
 
-Номера в `--commits` — из вывода `git xfer list` при тех же `--limit`
+Номера в `--commits` — из вывода `git-xfer list` при тех же `--limit`
 и профиле. Порядок применения (old → new) печатается отдельным блоком
 перед подтверждением: список показывается newest-first, как `git log`,
 а применяется наоборот.
@@ -308,10 +336,10 @@ git xfer apply -p myproj --to b --sha 1a2b3c4 5d6e7f8 --yes
 
 | | |
 |---|---|
-| `git xfer continue` | завершить текущий коммит и докрутить очередь |
-| `git xfer skip` | пропустить текущий коммит, продолжить остальные |
-| `git xfer abort` | откатить **только текущий** коммит; уже перенесённые остаются |
-| `git xfer status` | где остановились и что в очереди |
+| `git-xfer continue` | завершить текущий коммит и докрутить очередь |
+| `git-xfer skip` | пропустить текущий коммит, продолжить остальные |
+| `git-xfer abort` | откатить **только текущий** коммит; уже перенесённые остаются |
+| `git-xfer status` | где остановились и что в очереди |
 
 Можно закоммитить разрешение и самому (`git commit`) — `continue` это
 распознаёт. А вот если между паузой и `continue` HEAD уехал куда-то ещё,
