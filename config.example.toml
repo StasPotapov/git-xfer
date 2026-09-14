@@ -1,0 +1,25 @@
+# Пример конфига git-xfer.
+# Рабочее место: ~/.config/git-xfer/config.toml (учитывается XDG_CONFIG_HOME).
+# Создать шаблон на месте: git xfer init
+
+[defaults]
+scan_limit = 300        # сколько коммитов показывать в list/apply
+patchid_window = 2000   # сколько коммитов сравнивать по patch-id
+
+# Профиль = одно направление переноса. Обратное направление — отдельный
+# профиль с зеркальными source/target.
+
+[profiles.example]
+source = "/path/to/source-repo"
+source_branch = "master"
+target = "/path/to/target-repo"
+target_branch = "master"
+
+[profiles.example-back]
+source = "/path/to/target-repo"
+source_branch = "master"
+target = "/path/to/source-repo"
+target_branch = "master"
+# Значения из [defaults] можно переопределить внутри профиля:
+# scan_limit = 100
+# patchid_window = 500

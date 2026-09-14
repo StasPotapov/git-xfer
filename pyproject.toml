@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-xfer"
+version = "0.1.0"
+description = "Перенос коммитов между несвязанными git-репозиториями"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Stas Potapov" }]
+keywords = ["git", "cherry-pick", "patch", "cli"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+dependencies = []
+
+[project.scripts]
+git-xfer = "gitxfer.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/StasPotapov/git-xfer"
+
+[tool.setuptools]
+packages = ["gitxfer"]
