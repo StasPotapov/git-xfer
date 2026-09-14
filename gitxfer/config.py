@@ -31,13 +31,13 @@ CONFIG_TEMPLATE = """\
 scan_limit = 300        # сколько коммитов показывать в list/apply
 patchid_window = 2000   # сколько коммитов сравнивать по patch-id
 
-# [profiles.example]
+# [profiles.a2b]
 # source = "/path/to/repo-a"
 # source_branch = "master"
 # target = "/path/to/repo-b"
 # target_branch = "master"
 
-# [profiles.example-back]
+# [profiles.b2a]
 # source = "/path/to/repo-b"
 # source_branch = "master"
 # target = "/path/to/repo-a"

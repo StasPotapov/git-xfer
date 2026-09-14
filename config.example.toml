@@ -9,13 +9,13 @@ patchid_window = 2000   # сколько коммитов сравнивать �
 # Профиль = одно направление переноса. Обратное направление — отдельный
 # профиль с зеркальными source/target.
 
-[profiles.example]
+[profiles.a2b]
 source = "/path/to/repo-a"
 source_branch = "master"
 target = "/path/to/repo-b"
 target_branch = "master"
 
-[profiles.example-back]
+[profiles.b2a]
 source = "/path/to/repo-b"
 source_branch = "master"
 target = "/path/to/repo-a"

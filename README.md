@@ -66,9 +66,9 @@ chmod +x ~/.local/bin/git-xfer
 **3. Совсем без `PATH` — модулем**
 
 ```bash
-cd ~/tools/git-xfer && python3 -m gitxfer list -p example
+cd ~/tools/git-xfer && python3 -m gitxfer list -p a2b
 # или из любого каталога
-PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p example
+PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p a2b
 ```
 
 В этом варианте `git xfer` работать не будет — только `python3 -m gitxfer`.
@@ -94,7 +94,7 @@ $EDITOR ~/.config/git-xfer/config.toml
 
 ```bash
 git xfer init --config ~/tools/git-xfer.local.toml
-git xfer list --config ~/tools/git-xfer.local.toml -p example
+git xfer list --config ~/tools/git-xfer.local.toml -p a2b
 ```
 
 `--config` работает и до подкоманды, и после — как удобнее. Чтобы не
@@ -102,7 +102,7 @@ git xfer list --config ~/tools/git-xfer.local.toml -p example
 
 ```bash
 alias gx='git-xfer --config ~/tools/git-xfer.local.toml'
-gx list -p example
+gx list -p a2b
 ```
 
 Руками из примера в репозитории:
@@ -123,13 +123,13 @@ cp ~/tools/git-xfer/config.example.toml ~/.config/git-xfer/config.toml
 scan_limit = 300        # сколько коммитов показывать
 patchid_window = 2000   # окно сравнения patch-id
 
-[profiles.example]
+[profiles.a2b]
 source = "/path/to/repo-a"
 source_branch = "master"
 target = "/path/to/repo-b"
 target_branch = "master"
 
-[profiles.example-back]   # обратное направление — зеркальный профиль
+[profiles.b2a]   # обратное направление — зеркальный профиль
 source = "/path/to/repo-b"
 source_branch = "master"
 target = "/path/to/repo-a"
@@ -137,28 +137,108 @@ target_branch = "master"
 ```
 
 `scan_limit` и `patchid_window` можно переопределить внутри профиля.
-Направление переноса задаётся выбором профиля: `-p example` или
-`-p example-back`.
+Направление переноса задаётся выбором профиля: `-p a2b` или `-p b2a`.
 
 Рабочее состояние (кэш patch-id, маппинг перенесённых коммитов,
 незавершённая очередь) утилита держит отдельно от конфига —
 в `~/.local/state/git-xfer/` (учитывается `XDG_STATE_HOME`). Каталог
 создаётся сам, руками там ничего делать не нужно; снести — `cleanup --state`.
 
-## Сценарий
+## Туда-обратно: как это выглядит
 
-```bash
-git xfer doctor -p example            # предполётные проверки
-git xfer sync   -p example            # подтянуть объекты source → target
-git xfer list   -p example            # таблица коммитов с пометками + / ≈ / −
-git xfer plan   -p example -i         # сухой прогон: где будут конфликты
-git xfer apply  -p example -i         # выбрать 1,3,5-7 → перенести
-# конфликт → правите руками, git add ...
-git xfer continue -p example          # доведёт текущий коммит и докрутит очередь
-git xfer cleanup  -p example          # убрать служебные ссылки
+**Главное, что нужно понять: профиль — это направление, а не репозиторий.**
+Два репозитория, которые надо синхронизировать в обе стороны, описываются
+**двумя** профилями с зеркальными `source`/`target`. Какой из них указать
+в `-p`, то направление и сработает. Никаких «переключений режима» нет:
+`-p a2b` тащит из A в B, `-p b2a` — из B в A, и запускать их можно
+вперемешку хоть по очереди.
+
+Дальше — настоящий прогон на двух несвязанных репозиториях.
+
+### Из A в B
+
+Смотрим, что есть в A и чего нет в B:
+
+```console
+$ git xfer list -p a2b
+ 1 + d772cb8 2024-02-08 Ann Source chore: хвостовой коммит
+ 2 + 0f6ff9a 2024-02-06 Ann Source side: ветка
+ 3 + a2c0b9a 2024-02-05 Ann Source docs: переименование и правка
+ 4 + 47c2151 2024-02-04 Ann Source chore: бинарный ассет
+
+  + новый: 4   ≈ совпал patch-id: 0   − уже перенесён: 0
 ```
 
-`sync` выполняется сам, если объектов источника в целевом репозитории ещё нет.
+Берём третий и четвёртый. Номера — из этой же таблицы:
+
+```console
+$ git xfer apply -p a2b --commits 3,4 --yes
+
+Порядок применения (old → new), коммитов: 2
+    1. 47c2151 chore: бинарный ассет
+    2. a2c0b9a docs: переименование и правка
+
+[1/2] 47c2151da5f9 chore: бинарный ассет
+[2/2] a2c0b9af6e39 docs: переименование и правка
+
+Перенесено: 2; пусто: 0; пропущено: 0
+```
+
+Спрашиваем то же самое ещё раз — перенесённое утилита уже знает:
+
+```console
+$ git xfer list -p a2b
+ 1 + d772cb8 2024-02-08 Ann Source chore: хвостовой коммит
+ 2 + 0f6ff9a 2024-02-06 Ann Source side: ветка
+ 3 − a2c0b9a 2024-02-05 Ann Source docs: переименование и правка
+ 4 − 47c2151 2024-02-04 Ann Source chore: бинарный ассет
+
+  + новый: 2   ≈ совпал patch-id: 0   − уже перенесён: 2
+```
+
+### Из B в A — та же команда, другой профиль
+
+```console
+$ git xfer list -p b2a
+ 1 − d3405fd 2024-02-05 Ann Source docs: переименование и правка
+ 2 − 7c72adc 2024-02-04 Ann Source chore: бинарный ассет
+ 3 ≈ 44d844c 2024-02-11 Bob Target общая правка: shared.txt
+
+  + новый: 0   ≈ совпал patch-id: 1   − уже перенесён: 2
+```
+
+Обратите внимание: два коммита, которые мы только что отправили в B,
+с этой стороны помечены `−`. Обратно они не поедут — утилита видит,
+что это те же самые изменения, и не гоняет их по кругу. Если бы в B были
+свои коммиты, они стояли бы тут с пометкой `+`, и переносились бы
+ровно так же:
+
+```bash
+git xfer apply -p b2a --commits 1,2 --yes
+```
+
+### Полный цикл одной стороны
+
+```bash
+git xfer doctor -p a2b            # предполётные проверки
+git xfer sync   -p a2b            # подтянуть объекты source → target
+git xfer list   -p a2b            # таблица коммитов с пометками + / ≈ / −
+git xfer plan   -p a2b -i         # сухой прогон: где будут конфликты
+git xfer apply  -p a2b -i         # выбрать 1,3,5-7 → перенести
+# конфликт → правите руками, git add ...
+git xfer continue -p a2b          # доведёт текущий коммит и докрутит очередь
+git xfer cleanup  -p a2b          # убрать служебные ссылки
+```
+
+`sync` выполняется сам, если объектов источника в целевом репозитории ещё
+нет, так что начинать можно прямо с `list`. `doctor` и `cleanup` —
+по желанию: первый проверяет, что репозиторий готов, второй убирает
+служебные ссылки, когда переносить пока больше нечего.
+
+Одно ограничение, о котором стоит знать заранее: переносить можно только
+в ту ветку, которая указана в профиле как `target_branch`, и она должна
+быть сейчас выгружена в рабочем дереве. Если вы на другой ветке, `doctor`
+и `apply` об этом скажут и ничего не тронут.
 
 ### Пометки в списке
 
@@ -186,8 +266,8 @@ git xfer cleanup  -p example          # убрать служебные ссыл
 В скрипте интерактив недоступен — нужен явный выбор:
 
 ```bash
-git xfer apply -p example --commits 1,3,5-7 --yes
-git xfer apply -p example --sha 1a2b3c4 5d6e7f8 --yes
+git xfer apply -p a2b --commits 1,3,5-7 --yes
+git xfer apply -p a2b --sha 1a2b3c4 5d6e7f8 --yes
 ```
 
 Номера в `--commits` — из вывода `git xfer list` при тех же `--limit`
