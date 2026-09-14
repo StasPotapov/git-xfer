@@ -231,14 +231,25 @@ def start(
     return _drain(git, state, progress, options, Outcome(), report)
 
 
-def _load_progress(state: State, profile: Profile) -> Progress:
+def _load_progress(state: State, profile: Profile, report: Reporter = _noop) -> Progress:
+    """Незавершённая серия целевого репозитория.
+
+    Имя профиля здесь только для сведения: state привязан к целевому
+    репозиторию, очередь лежит в нём же, и доделывать её можно независимо
+    от того, как назвали направление в этот раз. Требовать совпадения имени
+    нельзя — разовый прогон (`-b feature`) даёт другое имя, и человек
+    остался бы посреди cherry-pick без единого способа его закончить.
+    """
     progress = state.in_progress
     if not progress:
         raise StateError("незавершённого переноса нет")
     if progress.profile != profile.name:
-        raise StateError(
-            f"незавершённый перенос принадлежит профилю {progress.profile!r}, "
-            f"а вызван {profile.name!r}"
+        report(
+            f"  серия начата как {progress.profile!r}, продолжаем её "
+            f"(сейчас вызвано как {profile.name!r})"
+        )
+        logbook.info(
+            "продолжаем серию профиля %s под именем %s", progress.profile, profile.name
         )
     return progress
 
@@ -287,7 +298,7 @@ def resume(
     report: Reporter = _noop,
 ) -> Outcome:
     """Докрутить очередь после конфликта: `continue` или `skip`."""
-    progress = _load_progress(state, profile)
+    progress = _load_progress(state, profile, report)
     options = Options.from_json(progress.opts)
     outcome = Outcome()
     current = progress.current
@@ -340,7 +351,7 @@ def resume(
 
 def abort(git: Git, profile: Profile, state: State, report: Reporter = _noop) -> Outcome:
     """Откатить только текущий коммит; уже перенесённые остаются на месте."""
-    progress = _load_progress(state, profile)
+    progress = _load_progress(state, profile, report)
     if git_path(git, "CHERRY_PICK_HEAD").exists():
         result = git.run("cherry-pick", "--abort", check=False, mutating=True)
         if not result.ok:

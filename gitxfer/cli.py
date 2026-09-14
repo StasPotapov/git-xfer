@@ -31,6 +31,7 @@ from .discover import (
     sync,
 )
 from .errors import (
+    EXIT_GIT,
     EXIT_INTERRUPT,
     ConfigError,
     EXIT_OK,
@@ -61,7 +62,10 @@ def _pick(title: str, options: list[tuple[str, str]], default: int = 1) -> int:
         if detail:
             print(f"     {detail}")
     while True:
-        answer = input(f"  выбор [{default}]: ").strip()
+        try:
+            answer = input(f"  выбор [{default}]: ").strip()
+        except EOFError:
+            raise KeyboardInterrupt from None
         if not answer:
             return default
         if answer.isdigit() and 1 <= int(answer) <= len(options):
@@ -121,7 +125,10 @@ def _current_branch(path: Path | None) -> str | None:
 def _ask(label: str, default: str | None) -> str:
     suffix = f" [{default}]" if default else ""
     while True:
-        answer = input(f"  {label}{suffix}: ").strip()
+        try:
+            answer = input(f"  {label}{suffix}: ").strip()
+        except EOFError:
+            raise KeyboardInterrupt from None
         if answer:
             return answer
         if default:
@@ -143,6 +150,18 @@ def _ask_setup(
     return source, source_branch, target, target_branch
 
 
+def _load_config_if_present(path: Path | None):
+    """Конфиг не обязателен, но сломанный конфиг — это ошибка, а не пустое место.
+
+    Иначе опечатка в профилях молча уводила бы прогон в ad-hoc, и человек
+    никогда бы не узнал, что его профили не читаются.
+    """
+    target = Path(path).expanduser() if path else config_path()
+    if not target.exists():
+        return None
+    return load_config(target)
+
+
 def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
     """Собрать направление из конфига, флагов и — если надо — вопросов.
 
@@ -151,29 +170,30 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
     """
     base: Profile | None = None
     config = None
+    # Оба пути заданы явно — конфиг не нужен вовсе, и спрашивать нечего.
     adhoc = bool(getattr(args, "source", None) and getattr(args, "target", None))
-    try:
+    # --ask без профиля: человек сейчас сам назовёт и репозитории, и ветки.
+    ask_all = args.ask and not args.profile
+    if not (adhoc or ask_all):
         config = load_config(args.config)
-        # При --ask без профиля спрашивать ещё и профиль незачем: человек
-        # и так сейчас назовёт оба репозитория и обе ветки руками.
-        if not (args.ask and not args.profile):
-            pair = _choose_pair(config, args)
-            base = pair.direction(_choose_direction(pair, args))
-    except ConfigError:
-        # Конфига может не быть вовсе — если всё задано флагами или спросим.
-        if args.profile or not (adhoc or args.ask):
-            raise
+        pair = _choose_pair(config, args)
+        base = pair.direction(_choose_direction(pair, args))
+    elif not args.profile:
+        # Конфиг здесь необязателен, но если он есть и сломан — молчать нельзя.
+        config = _load_config_if_present(args.config)
 
     source = args.source or (base.source if base else None)
     target = args.target or (base.target if base else None)
     # Одна ветка на обе стороны — самый частый разовый случай.
     src_branch = args.source_branch or args.branch
     dst_branch = args.target_branch or args.branch
-    # Указали только одну сторону — вторая называется так же.
-    src_branch = src_branch or dst_branch
-    dst_branch = dst_branch or src_branch
+    # Профиль знает свои ветки, и флаг про одну сторону не должен трогать
+    # вторую: «-p t --target-branch stable» иначе молча увёл бы и источник.
     src_branch = src_branch or (base.source_branch if base else None)
     dst_branch = dst_branch or (base.target_branch if base else None)
+    # А вот когда про вторую сторону не знает никто — она называется так же.
+    src_branch = src_branch or dst_branch
+    dst_branch = dst_branch or src_branch
 
     if args.ask or not (source and target and src_branch and dst_branch):
         if not sys.stdin.isatty():
@@ -297,7 +317,12 @@ def confirm(question: str, *, assume_yes: bool) -> bool:
         return True
     if not sys.stdin.isatty():
         raise XferError("нужно подтверждение, но stdin не терминал. Добавьте --yes")
-    answer = input(f"{question} [y/N]: ").strip().lower()
+    try:
+        answer = input(f"{question} [y/N]: ").strip().lower()
+    except EOFError:
+        # Ctrl-D в вопросе «делать?» — это «нет», а не трейсбек.
+        print()
+        return False
     return answer in ("y", "yes", "д", "да")
 
 
@@ -762,8 +787,12 @@ def main(argv: list[str] | None = None) -> int:
         code = EXIT_INTERRUPT
         return code
     except BrokenPipeError:
-        return EXIT_OK
+        code = EXIT_OK
+        return code
     except Exception:
+        # Журнал заводили ровно ради таких случаев — он не должен врать,
+        # что прогон закончился нулём.
+        code = EXIT_GIT
         logbook.error("непредвиденная ошибка", exc_info=True)
         raise
     finally:

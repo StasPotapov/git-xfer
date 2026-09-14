@@ -183,8 +183,11 @@ git-xfer list -p myproj --to b -b feature/login    # обе стороны
 git-xfer list -p myproj --to b --source-branch feature/login --target-branch integration
 ```
 
-Указали только одну сторону — вторая берёт то же имя. У такого прогона
-свой служебный ref, так что обычные профили он не задевает.
+Флаг про одну сторону вторую не трогает: с профилем `-p myproj --to b
+--source-branch feature/login` возьмёт `feature/login` из источника и
+положит в ветку цели из конфига. Имя «то же самое» подставляется только
+там, где о второй стороне не знает никто — то есть без профиля. У разового
+прогона свой служебный ref, так что обычные профили он не задевает.
 
 Можно и вовсе без конфига:
 
@@ -479,7 +482,7 @@ git -C <TARGET> -c protocol.file.allow=always \
 во временном каталоге и удаляется в конце:
 
 ```bash
-sh tests/smoke.sh          # 71 проверка
+sh tests/smoke.sh          # 87 проверок
 KEEP=1 sh tests/smoke.sh   # оставить стенд для разбора
 ```
 

@@ -300,6 +300,70 @@ check "$BEFORE" "$(wc -c < "$LOG")" "log = false в конфиге выключ�
 OUT=$(xfer status --config "$QUIET" -p t --to b 2>&1)
 has "Журнал:  выключен" "$OUT" "status честно говорит, что журнал выключен"
 
+echo "== 19. флаги в обход конфига =="
+OUT=$(xfer list --source "$WORK/a" --target "$WORK/b" -b master </dev/null 2>&1); CODE=$?
+check 0 $CODE "--source/--target работают, когда конфиг не нужен"
+hasnt "укажите направление" "$OUT" "и не требуют --to"
+BROKEN="$WORK/broken.toml"
+printf '[profiles.x]\na = "/nowhere"\n' > "$BROKEN"
+OUT=$(xfer list --config "$BROKEN" --source "$WORK/a" --target "$WORK/b" -b master </dev/null 2>&1); CODE=$?
+check 1 $CODE "сломанный конфиг не проглатывается молча"
+has "profiles.x" "$OUT" "и названа причина"
+
+echo "== 20. флаг про одну ветку не трогает вторую =="
+git -C "$WORK/a" branch -q rel 2>/dev/null
+git -C "$WORK/b" branch -q rel 2>/dev/null
+OUT=$(xfer doctor -p t --to b --source-branch rel 2>&1)
+has "/a (rel)" "$OUT" "источник взял указанную ветку"
+has "/b (master)" "$OUT" "а цель осталась из профиля"
+OUT=$(xfer doctor -p t --to b --target-branch rel 2>&1)
+has "/a (master)" "$OUT" "и зеркально: источник из профиля"
+has "/b (rel)" "$OUT" "цель — указанная"
+OUT=$(xfer list --source "$WORK/a" --target "$WORK/b" --source-branch master </dev/null 2>&1); CODE=$?
+check 0 $CODE "без конфига вторая сторона всё ещё берёт то же имя"
+
+echo "== 21. серию можно доделать под другим именем =="
+# Конфликт делаем нарочно: обе стороны заводят один файл с разным текстом.
+git -C "$WORK/a" checkout -q -B rel master
+printf 'from-a\n' > "$WORK/a/clash.txt"
+git -C "$WORK/a" add clash.txt
+git -C "$WORK/a" -c user.name=Ann -c user.email=ann@e commit -q -m "rel: clash"
+git -C "$WORK/a" checkout -q master
+git -C "$WORK/b" checkout -q -B rel master
+printf 'from-b\n' > "$WORK/b/clash.txt"
+git -C "$WORK/b" add clash.txt
+git -C "$WORK/b" -c user.name=Bob -c user.email=bob@e commit -q -m "rel: clash"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer apply -p t --to b -b rel --commits 1 --yes >/dev/null 2>&1
+check 3 $? "серия с -b rel встала на конфликте"
+if [ -e "$WORK/b/.git/CHERRY_PICK_HEAD" ]; then ok "cherry-pick на паузе"; else bad "cherry-pick на паузе"; fi
+# Имя направления теперь другое (без -b), но доделать серию это мешать не должно.
+OUT=$(xfer abort -p t --to b 2>&1); CODE=$?
+check 0 $CODE "abort без -b доделывает серию, начатую с -b"
+has "серия начата как" "$OUT" "и честно говорит, что имя другое"
+check "" "$(git -C "$WORK/b" status --porcelain=v2)" "после abort дерево чистое"
+git -C "$WORK/b" checkout -q master
+xfer cleanup -p t --to b --all --state >/dev/null 2>&1
+
+echo "== 22. пример конфига не расходится с тем, что пишет init =="
+CHECK=$(PYTHONPATH="$ROOT" python3 -c '
+import tomllib
+from pathlib import Path
+from gitxfer.config import CONFIG_TEMPLATE, load_config
+example = Path("'"$ROOT"'/config.example.toml")
+a = sorted(tomllib.loads(CONFIG_TEMPLATE).get("defaults", {}))
+b = sorted(tomllib.loads(example.read_text()).get("defaults", {}))
+cfg = load_config(example)
+pair = next(iter(cfg.profiles.values()))
+print("OK" if a == b and pair.implied is None else "FAIL")
+' 2>&1)
+check "OK" "$CHECK" "пример разбирается, ключи те же, профиль — пара"
+if grep -q "git xfer " "$ROOT/config.example.toml"; then
+  bad "в примере не осталось вызовов через пробел"
+else
+  ok "в примере не осталось вызовов через пробел"
+fi
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]
