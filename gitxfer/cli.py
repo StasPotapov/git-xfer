@@ -407,32 +407,60 @@ class Parser(argparse.ArgumentParser):
         raise SystemExit(EXIT_USAGE)
 
 
+def _add_common(parser: argparse.ArgumentParser, *, after_command: bool) -> None:
+    """Флаги, работающие и до подкоманды, и после неё.
+
+    В копии для подкоманды дефолт — SUPPRESS: без него argparse затёр бы
+    значение, разобранное головным парсером, и `git xfer --config X init`
+    перестал бы работать.
+    """
+    hidden = argparse.SUPPRESS
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=hidden if after_command else None,
+        help=f"путь к конфигу (по умолчанию {config_path()})",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=hidden if after_command else False,
+        help="печатать вызовы git",
+    )
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        default=hidden if after_command else False,
+        help="не выполнять команды, меняющие репозиторий",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = Parser(
         prog="git xfer",
         description="Перенос коммитов между несвязанными git-репозиториями.",
     )
     parser.add_argument("--version", action="version", version=f"git-xfer {__version__}")
-    parser.add_argument("--config", type=Path, help=f"путь к конфигу (по умолчанию {config_path()})")
-    parser.add_argument("-v", "--verbose", action="store_true", help="печатать вызовы git")
-    parser.add_argument(
-        "-n", "--dry-run", action="store_true", help="не выполнять команды, меняющие репозиторий"
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    _add_common(parser, after_command=False)
+    common = argparse.ArgumentParser(add_help=False)
+    _add_common(common, after_command=True)
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
 
-    init = subparsers.add_parser("init", help="создать шаблон конфига")
+    init = subparsers.add_parser("init", help="создать шаблон конфига", parents=[common])
     init.add_argument("--force", action="store_true", help="перезаписать существующий")
     init.set_defaults(func=cmd_init)
 
-    doctor = subparsers.add_parser("doctor", help="предполётные проверки")
+    doctor = subparsers.add_parser("doctor", help="предполётные проверки", parents=[common])
     _add_profile(doctor)
     doctor.set_defaults(func=cmd_doctor)
 
-    sync_cmd = subparsers.add_parser("sync", help="перенести объекты source → target")
+    sync_cmd = subparsers.add_parser("sync", help="перенести объекты source → target", parents=[common])
     _add_profile(sync_cmd)
     sync_cmd.set_defaults(func=cmd_sync)
 
-    list_cmd = subparsers.add_parser("list", help="таблица коммитов источника")
+    list_cmd = subparsers.add_parser("list", help="таблица коммитов источника", parents=[common])
     _add_profile(list_cmd)
     list_cmd.add_argument("--limit", type=int, help="сколько коммитов показывать")
     list_cmd.add_argument("--new", action="store_true", help="только непереносившиеся")
@@ -442,12 +470,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_cmd.set_defaults(func=cmd_list)
 
-    plan_cmd = subparsers.add_parser("plan", help="сухой прогон: где будут конфликты")
+    plan_cmd = subparsers.add_parser("plan", help="сухой прогон: где будут конфликты", parents=[common])
     _add_profile(plan_cmd)
     _add_selection(plan_cmd)
     plan_cmd.set_defaults(func=cmd_plan)
 
-    apply_cmd = subparsers.add_parser("apply", help="перенести выбранные коммиты")
+    apply_cmd = subparsers.add_parser("apply", help="перенести выбранные коммиты", parents=[common])
     _add_profile(apply_cmd)
     _add_selection(apply_cmd)
     apply_cmd.add_argument("--yes", action="store_true", help="не спрашивать подтверждения")
@@ -465,23 +493,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply_cmd.set_defaults(func=cmd_apply)
 
-    cont = subparsers.add_parser("continue", help="продолжить после разрешения конфликта")
+    cont = subparsers.add_parser("continue", help="продолжить после разрешения конфликта", parents=[common])
     _add_profile(cont)
     cont.set_defaults(func=cmd_continue)
 
-    skip_cmd = subparsers.add_parser("skip", help="пропустить конфликтный коммит")
+    skip_cmd = subparsers.add_parser("skip", help="пропустить конфликтный коммит", parents=[common])
     _add_profile(skip_cmd)
     skip_cmd.set_defaults(func=cmd_skip)
 
-    abort_cmd = subparsers.add_parser("abort", help="прервать серию, откатив текущий коммит")
+    abort_cmd = subparsers.add_parser("abort", help="прервать серию, откатив текущий коммит", parents=[common])
     _add_profile(abort_cmd)
     abort_cmd.set_defaults(func=cmd_abort)
 
-    status_cmd = subparsers.add_parser("status", help="состояние незавершённого переноса")
+    status_cmd = subparsers.add_parser("status", help="состояние незавершённого переноса", parents=[common])
     _add_profile(status_cmd)
     status_cmd.set_defaults(func=cmd_status)
 
-    cleanup = subparsers.add_parser("cleanup", help="убрать refs/xfer/* и state")
+    cleanup = subparsers.add_parser("cleanup", help="убрать refs/xfer/* и state", parents=[common])
     _add_profile(cleanup)
     cleanup.add_argument("--all", action="store_true", help="все refs/xfer/*, не только профиля")
     cleanup.add_argument("--state", action="store_true", help="удалить и state-файл")

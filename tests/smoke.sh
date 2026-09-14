@@ -219,6 +219,28 @@ else
   ok "python старше 3.11 на машине не нашёлся — проверку пропускаем"
 fi
 
+echo "== 15. конфиг в произвольном месте =="
+CUSTOM="$WORK/custom.local.toml"
+xfer init --config "$CUSTOM" >/dev/null 2>&1
+check 0 $? "init принимает --config после подкоманды"
+if [ -f "$CUSTOM" ]; then ok "шаблон создан по указанному пути"; else bad "шаблон создан по указанному пути"; fi
+cat >> "$CUSTOM" <<EOF
+
+[profiles.custom]
+source = "$WORK/a"
+source_branch = "master"
+target = "$WORK/b"
+target_branch = "master"
+EOF
+xfer doctor --config "$CUSTOM" -p custom >/dev/null 2>&1
+check 0 $? "конфиг читается с --config после подкоманды"
+xfer --config "$CUSTOM" doctor -p custom >/dev/null 2>&1
+check 0 $? "и с --config до подкоманды"
+OUT=$(xfer -v --config "$CUSTOM" doctor -p custom 2>&1 >/dev/null | head -1)
+has "^+ git " "$OUT" "-v до подкоманды печатает вызовы git"
+OUT=$(xfer doctor --config "$CUSTOM" -v -p custom 2>&1 >/dev/null | head -1)
+has "^+ git " "$OUT" "-v после подкоманды тоже"
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]

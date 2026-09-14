@@ -21,62 +21,141 @@
 uv tool install git+https://github.com/StasPotapov/git-xfer
 # или
 pipx install git+https://github.com/StasPotapov/git-xfer
-# или из клона
-cd git-xfer && pipx install .
-# или вовсе без установки — симлинком из клона
-ln -s "$PWD/bin/git-xfer" ~/.local/bin/git-xfer
 ```
 
-Из корня клона утилиту можно звать и модулем: `python3 -m gitxfer …`.
+`uv` и `pipx` фиксируют интерпретатор при установке. Если их нет или ставить
+в систему не хочется — работает и голый клон, см. ниже.
 
-`uv` и `pipx` фиксируют интерпретатор при установке. Симлинк и `-m` берут
-тот `python3`, что первым в `PATH` (на macOS это часто системный 3.9) —
-в этом случае утилита не падает трейсбеком, а объясняет, какая версия нужна
-и как её задать.
+## Без установки: клон
+
+```bash
+git clone git@github.com:StasPotapov/git-xfer.git ~/tools/git-xfer
+python3 --version          # должно быть 3.11 или новее
+```
+
+Дальше — любой из трёх способов. Обновление в любом случае одно: `git pull`
+в клоне, переустанавливать нечего.
+
+**1. Симлинк в `PATH` — и утилита работает как `git xfer`**
+
+```bash
+mkdir -p ~/.local/bin
+ln -s ~/tools/git-xfer/bin/git-xfer ~/.local/bin/git-xfer
+# если ~/.local/bin ещё не в PATH:
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
+git xfer --version
+```
+
+Только так и получается подкоманда `git xfer`: git ищет в `PATH`
+исполняемый файл с именем `git-xfer`. Алиас шелла для этого не годится —
+git его не видит.
+
+**2. Обёртка вместо симлинка — когда нужен конкретный интерпретатор**
+
+```bash
+cat > ~/.local/bin/git-xfer <<'EOF'
+#!/bin/sh
+exec python3.11 "$HOME/tools/git-xfer/bin/git-xfer" "$@"
+EOF
+chmod +x ~/.local/bin/git-xfer
+```
+
+Пригодится там, где первым в `PATH` лежит старый `python3` — на macOS это
+обычно системный 3.9.
+
+**3. Совсем без `PATH` — модулем**
+
+```bash
+cd ~/tools/git-xfer && python3 -m gitxfer list -p example
+# или из любого каталога
+PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p example
+```
+
+В этом варианте `git xfer` работать не будет — только `python3 -m gitxfer`.
 
 ## Конфиг
 
+Штатное место — `~/.config/git-xfer/config.toml` (учитывается
+`XDG_CONFIG_HOME`). От способа установки не зависит: клон, симлинк и
+`pipx` смотрят в один и тот же файл. Утилита его только читает, правится
+он руками.
+
+**Завести можно тремя способами.**
+
+Шаблон на штатное место — каталог создастся сам:
+
 ```bash
-git xfer init                      # создаст шаблон
+git xfer init
 $EDITOR ~/.config/git-xfer/config.toml
 ```
 
-Конфиг живёт **вне** репозитория утилиты (учитывается `XDG_CONFIG_HOME`),
-правится руками и читается только на чтение. Пути к рабочим проектам
-не попадают ни в репозиторий, ни в публикацию.
+Свой путь, если не хочется трогать `~/.config` (например, конфиг лежит
+рядом с клоном или в дотфайлах):
+
+```bash
+git xfer init --config ~/tools/git-xfer.local.toml
+git xfer list --config ~/tools/git-xfer.local.toml -p example
+```
+
+`--config` работает и до подкоманды, и после — как удобнее. Чтобы не
+писать его каждый раз:
+
+```bash
+alias gx='git-xfer --config ~/tools/git-xfer.local.toml'
+gx list -p example
+```
+
+Руками из примера в репозитории:
+
+```bash
+mkdir -p ~/.config/git-xfer
+cp ~/tools/git-xfer/config.example.toml ~/.config/git-xfer/config.toml
+```
+
+Если держите конфиг внутри клона — он под git, и реальные пути к рабочим
+репозиториям уедут в историю. `.gitignore` уже исключает `*.local.toml`,
+так что называйте файл `что-нибудь.local.toml`.
+
+**Содержимое:**
 
 ```toml
 [defaults]
 scan_limit = 300        # сколько коммитов показывать
 patchid_window = 2000   # окно сравнения patch-id
 
-[profiles.proj]
-source = "/Users/me/dev/project-a"
+[profiles.example]
+source = "/path/to/repo-a"
 source_branch = "master"
-target = "/Users/me/dev/project-b"
+target = "/path/to/repo-b"
 target_branch = "master"
 
-[profiles.proj-back]    # обратное направление — зеркальный профиль
-source = "/Users/me/dev/project-b"
+[profiles.example-back]   # обратное направление — зеркальный профиль
+source = "/path/to/repo-b"
 source_branch = "master"
-target = "/Users/me/dev/project-a"
+target = "/path/to/repo-a"
 target_branch = "master"
 ```
 
 `scan_limit` и `patchid_window` можно переопределить внутри профиля.
-Направление переноса задаётся выбором профиля: `-p proj` или `-p proj-back`.
+Направление переноса задаётся выбором профиля: `-p example` или
+`-p example-back`.
+
+Рабочее состояние (кэш patch-id, маппинг перенесённых коммитов,
+незавершённая очередь) утилита держит отдельно от конфига —
+в `~/.local/state/git-xfer/` (учитывается `XDG_STATE_HOME`). Каталог
+создаётся сам, руками там ничего делать не нужно; снести — `cleanup --state`.
 
 ## Сценарий
 
 ```bash
-git xfer doctor -p proj            # предполётные проверки
-git xfer sync   -p proj            # подтянуть объекты source → target
-git xfer list   -p proj            # таблица коммитов с пометками + / ≈ / −
-git xfer plan   -p proj -i         # сухой прогон: где будут конфликты
-git xfer apply  -p proj -i         # выбрать 1,3,5-7 → перенести
+git xfer doctor -p example            # предполётные проверки
+git xfer sync   -p example            # подтянуть объекты source → target
+git xfer list   -p example            # таблица коммитов с пометками + / ≈ / −
+git xfer plan   -p example -i         # сухой прогон: где будут конфликты
+git xfer apply  -p example -i         # выбрать 1,3,5-7 → перенести
 # конфликт → правите руками, git add ...
-git xfer continue -p proj          # доведёт текущий коммит и докрутит очередь
-git xfer cleanup  -p proj          # убрать служебные ссылки
+git xfer continue -p example          # доведёт текущий коммит и докрутит очередь
+git xfer cleanup  -p example          # убрать служебные ссылки
 ```
 
 `sync` выполняется сам, если объектов источника в целевом репозитории ещё нет.
@@ -107,8 +186,8 @@ git xfer cleanup  -p proj          # убрать служебные ссылк�
 В скрипте интерактив недоступен — нужен явный выбор:
 
 ```bash
-git xfer apply -p proj --commits 1,3,5-7 --yes
-git xfer apply -p proj --sha 1a2b3c4 5d6e7f8 --yes
+git xfer apply -p example --commits 1,3,5-7 --yes
+git xfer apply -p example --sha 1a2b3c4 5d6e7f8 --yes
 ```
 
 Номера в `--commits` — из вывода `git xfer list` при тех же `--limit`
@@ -246,7 +325,7 @@ git -C <TARGET> -c protocol.file.allow=always \
 во временном каталоге и удаляется в конце:
 
 ```bash
-sh tests/smoke.sh          # 48 проверок
+sh tests/smoke.sh          # 54 проверки
 KEEP=1 sh tests/smoke.sh   # оставить стенд для разбора
 ```
 

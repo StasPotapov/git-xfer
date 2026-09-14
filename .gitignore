@@ -6,3 +6,6 @@ dist/
 *.egg-info/
 .DS_Store
 .memsearch/
+
+# Локальный конфиг с реальными путями — не в историю
+*.local.toml

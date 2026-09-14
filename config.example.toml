@@ -10,15 +10,15 @@ patchid_window = 2000   # сколько коммитов сравнивать �
 # профиль с зеркальными source/target.
 
 [profiles.example]
-source = "/path/to/source-repo"
+source = "/path/to/repo-a"
 source_branch = "master"
-target = "/path/to/target-repo"
+target = "/path/to/repo-b"
 target_branch = "master"
 
 [profiles.example-back]
-source = "/path/to/target-repo"
+source = "/path/to/repo-b"
 source_branch = "master"
-target = "/path/to/source-repo"
+target = "/path/to/repo-a"
 target_branch = "master"
 # Значения из [defaults] можно переопределить внутри профиля:
 # scan_limit = 100

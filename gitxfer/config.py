@@ -31,16 +31,16 @@ CONFIG_TEMPLATE = """\
 scan_limit = 300        # сколько коммитов показывать в list/apply
 patchid_window = 2000   # сколько коммитов сравнивать по patch-id
 
-# [profiles.proj]
-# source = "/Users/me/dev/project-a"
+# [profiles.example]
+# source = "/path/to/repo-a"
 # source_branch = "master"
-# target = "/Users/me/dev/project-b"
+# target = "/path/to/repo-b"
 # target_branch = "master"
 
-# [profiles.proj-back]
-# source = "/Users/me/dev/project-b"
+# [profiles.example-back]
+# source = "/path/to/repo-b"
 # source_branch = "master"
-# target = "/Users/me/dev/project-a"
+# target = "/path/to/repo-a"
 # target_branch = "master"
 """
 
