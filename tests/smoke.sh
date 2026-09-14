@@ -461,6 +461,37 @@ else
   bad "журнал отметил, что каталога нет"
 fi
 
+echo "== 29. скилл описывает то, что утилита правда говорит =="
+SKILL="$ROOT/skills/git-xfer/SKILL.md"
+# Симптомы из таблицы «если что-то не работает» должны совпадать с текстами,
+# которые утилита выдаёт на самом деле, иначе агент их не опознает.
+sk() { grep -qF -- "$1" "$SKILL" && ok "в скилле описано: $2" || bad "в скилле описано: $2"; }
+
+OUT=$(xfer doctor --config "$WORK/nope.toml" -p x 2>&1); MSG=$(printf '%s\n' "$OUT" | head -1)
+case "$MSG" in *"конфиг не найден"*) ok "текст «конфиг не найден» не менялся";;
+                *) bad "текст «конфиг не найден» не менялся (сейчас: $MSG)";; esac
+sk "конфиг не найден" "отсутствующий конфиг"
+
+xfer init --config "$WORK/tpl.toml" >/dev/null 2>&1
+OUT=$(xfer doctor --config "$WORK/tpl.toml" -p x 2>&1 | head -1)
+case "$OUT" in *"не описан ни один профиль"*) ok "текст про пустой шаблон не менялся";;
+                *) bad "текст про пустой шаблон не менялся (сейчас: $OUT)";; esac
+sk "не описан ни один профиль" "пустой шаблон"
+
+OUT=$(python3 "$ROOT/gitxfer/cli.py" 2>&1 | head -1)
+case "$OUT" in *"часть пакета"*) ok "текст про запуск файла не менялся";;
+                *) bad "текст про запуск файла не менялся (сейчас: $OUT)";; esac
+
+sk "is not a git command" "git xfer без PATH"
+sk "нужен Python 3.11 или новее" "старый python"
+sk "os.getcwd()" "исчезнувший каталог"
+sk "gh repo clone StasPotapov/git-xfer" "клон приватного репозитория"
+if grep -qF "https://github.com/StasPotapov/git-xfer.git" "$SKILL"; then
+  bad "в скилле нет анонимного https-клона приватного репозитория"
+else
+  ok "в скилле нет анонимного https-клона приватного репозитория"
+fi
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]
