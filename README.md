@@ -44,11 +44,18 @@ mkdir -p ~/.local/bin
 ln -s ~/tools/git-xfer/bin/git-xfer ~/.local/bin/git-xfer
 # если ~/.local/bin ещё не в PATH:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
-git-xfer --version
+
+git-xfer --version          # так и зовите: через дефис
 ```
 
-Имя файла важно: именно по нему git находит подкоманду `git xfer`.
-Алиас шелла для этого не годится — git его не видит.
+**Зовите через дефис — `git-xfer`.** Это обычный запуск программы из
+`PATH`, его ничем не перехватить. Форма `git xfer` через пробел тоже
+сработает, но она зависит от того, как git разрешает подкоманды, и
+[может однажды начать означать другое](#git-xfer-или-git-xfer).
+
+Имя файла менять нельзя: `git-xfer` — это и имя команды, и то, по чему
+git находит подкоманду. Алиас шелла вместо симлинка не годится — git
+его не видит.
 
 **2. Обёртка вместо симлинка — когда нужен конкретный интерпретатор**
 
@@ -58,6 +65,8 @@ cat > ~/.local/bin/git-xfer <<'EOF'
 exec python3.11 "$HOME/tools/git-xfer/bin/git-xfer" "$@"
 EOF
 chmod +x ~/.local/bin/git-xfer
+
+git-xfer --version
 ```
 
 Пригодится там, где первым в `PATH` лежит старый `python3` — на macOS это
