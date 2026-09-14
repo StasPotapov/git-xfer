@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tomllib
@@ -72,9 +73,17 @@ class Profile:
 
     @property
     def alias(self) -> str:
-        """Имя профиля, пригодное как компонент ref."""
-        alias = _REF_UNSAFE.sub("-", self.name).strip("-.") or "profile"
-        return alias
+        """Имя профиля, пригодное как компонент ref.
+
+        Если чистка что-то изменила, дописываем хвост хеша исходного имени:
+        иначе `proj/back` и `proj-back` схлопнутся в один ref, и forced-пуш
+        второго профиля молча перезапишет объекты первого.
+        """
+        alias = _REF_UNSAFE.sub("-", self.name).strip("-.")
+        if alias == self.name:
+            return alias
+        digest = hashlib.sha1(self.name.encode("utf-8")).hexdigest()[:8]
+        return f"{alias or 'profile'}-{digest}"
 
     @property
     def ref(self) -> str:

@@ -55,11 +55,18 @@ class Context:
 
     def ensure_ref(self) -> None:
         """Объекты источника должны быть в целевом репо."""
+        if has_ref(self.target, self.profile.ref):
+            return
+        if self.args.dry_run:
+            # Подтянуть их молча нельзя — это запись в репозиторий.
+            raise XferError(
+                f"объектов источника нет ({self.profile.ref}), а --dry-run не даёт их "
+                f"подтянуть. Выполните сначала: git xfer sync -p {self.profile.name}"
+            )
+        eprint(f"Объекты источника ещё не перенесены, выполняю sync ({self.profile.ref})")
+        sync(self.target, self.profile)
         if not has_ref(self.target, self.profile.ref):
-            eprint(f"Объекты источника ещё не перенесены, выполняю sync ({self.profile.ref})")
-            sync(self.target, self.profile)
-            if not has_ref(self.target, self.profile.ref):
-                raise XferError(f"не удалось создать {self.profile.ref}")
+            raise XferError(f"не удалось создать {self.profile.ref}")
 
     def survey(self, *, limit: int | None = None, use_patch_id: bool = True) -> Survey:
         result = survey(
@@ -68,8 +75,9 @@ class Context:
             self.state,
             limit=limit,
             use_patch_id=use_patch_id,
+            allow_merges=getattr(self.args, "allow_merges", False),
         )
-        self.state.trim_patchid_cache()
+        self.state.trim_patchid_cache(result.hot_shas)
         self.state.save()
         return result
 
@@ -248,12 +256,18 @@ def _options(args: argparse.Namespace) -> Options:
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        # Под --dry-run cherry-pick не выполняется, HEAD не двигается,
+        # и каждый коммит выглядел бы пустым. Сухой прогон — это plan.
+        raise XferError("для сухого прогона есть отдельная подкоманда: git xfer plan")
     context = Context(args)
-    context.ensure_ref()
+    # Проверки раньше fetch: незачем тащить объекты в репозиторий,
+    # который мы тут же признаем непригодным.
     report = run_preflight(context.target, context.source, context.profile)
     for check in report.warnings:
         eprint(check.render())
     report.raise_if_failed()
+    context.ensure_ref()
 
     view = context.survey(limit=args.limit, use_patch_id=not args.no_patch_id)
     rows = resolve_rows(context, view)
@@ -347,7 +361,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         refs = [profile.ref]
     for ref in refs:
         context.target.run("update-ref", "-d", ref, mutating=True)
-        print(f"Удалён {ref}")
+        if not args.dry_run:
+            print(f"Удалён {ref}")
     if not refs:
         print("Ссылок refs/xfer/* не найдено")
     if args.state:
@@ -377,10 +392,23 @@ def _add_selection(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sha", nargs="+", metavar="SHA", help="коммиты источника по хешу")
     parser.add_argument("--limit", type=int, help="сколько коммитов показывать")
     parser.add_argument("--no-patch-id", action="store_true", help="не считать patch-id (быстрее)")
+    parser.add_argument(
+        "--allow-merges", action="store_true", help="показывать и переносить merge-коммиты"
+    )
+
+
+class Parser(argparse.ArgumentParser):
+    """argparse по умолчанию выходит с кодом 2, а он занят предполётной
+    проверкой: скрипт должен отличать «репозиторий не готов» от «неверный вызов»."""
+
+    def error(self, message: str):  # noqa: D102
+        self.print_usage(sys.stderr)
+        eprint(f"{self.prog}: ошибка: {message}")
+        raise SystemExit(EXIT_USAGE)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = Parser(
         prog="git xfer",
         description="Перенос коммитов между несвязанными git-репозиториями.",
     )
@@ -409,6 +437,9 @@ def build_parser() -> argparse.ArgumentParser:
     list_cmd.add_argument("--limit", type=int, help="сколько коммитов показывать")
     list_cmd.add_argument("--new", action="store_true", help="только непереносившиеся")
     list_cmd.add_argument("--no-patch-id", action="store_true", help="не считать patch-id")
+    list_cmd.add_argument(
+        "--allow-merges", action="store_true", help="показывать и merge-коммиты"
+    )
     list_cmd.set_defaults(func=cmd_list)
 
     plan_cmd = subparsers.add_parser("plan", help="сухой прогон: где будут конфликты")
@@ -427,7 +458,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--empty", choices=("drop", "keep", "stop"), default="drop",
         help="что делать с коммитом, ставшим пустым",
     )
-    apply_cmd.add_argument("--allow-merges", action="store_true", help="переносить и merge-коммиты")
     apply_cmd.add_argument("--hooks", action="store_true", help="не отключать хуки")
     apply_cmd.add_argument("--gpg-sign", action="store_true", help="подписывать коммиты")
     apply_cmd.add_argument(

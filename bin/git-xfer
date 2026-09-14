@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Запуск прямо из клона, без установки.
+
+Симлинк этого файла в `~/.local/bin/git-xfer` работает: `resolve()` идёт
+по симлинку до самого файла, поэтому в `sys.path` попадает клон, а не
+каталог, откуда утилиту позвали.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from gitxfer.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

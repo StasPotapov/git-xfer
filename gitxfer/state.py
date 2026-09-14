@@ -145,13 +145,23 @@ class State:
     def forget_progress(self) -> None:
         self.in_progress = None
 
-    def trim_patchid_cache(self, keep: int = 20000) -> None:
-        """Кэш не должен расти бесконечно; порядок вставки = порядок обхода."""
+    def trim_patchid_cache(self, hot: set[str] | None = None, keep: int = 20000) -> None:
+        """Кэш не должен расти бесконечно.
+
+        Порядок вставки тут ничего не значит: `save()` пишет с `sort_keys`,
+        и после первого же save/load словарь идёт лексикографически по sha.
+        Поэтому вытесняем осмысленно — сначала всё, что не понадобилось
+        в этом прогоне.
+        """
         if len(self.patchid_cache) <= keep:
             return
-        extra = len(self.patchid_cache) - keep
-        for key in list(self.patchid_cache)[:extra]:
-            del self.patchid_cache[key]
+        hot = hot or set()
+        for key in list(self.patchid_cache):
+            if len(self.patchid_cache) <= keep:
+                return
+            if key not in hot:
+                del self.patchid_cache[key]
+        # Горячих записей больше лимита — лимит не догма, кэш валиден.
 
     def reset(self) -> None:
         self.patchid_cache.clear()

@@ -60,6 +60,8 @@ class Survey:
     rows: list[Row] = field(default_factory=list)
     source_ref: str = ""
     scanned_target: int = 0
+    #: Коммиты, по которым в этом прогоне нужен patch-id — «горячая» часть кэша.
+    hot_shas: set[str] = field(default_factory=set)
 
     def by_number(self, number: int) -> Row | None:
         if 1 <= number <= len(self.rows):
@@ -171,19 +173,6 @@ class ShaSet:
         return found[0] if len(found) == 1 else None
 
 
-def existing_commits(git: Git, shas: list[str]) -> set[str]:
-    """Какие из переданных объектов реально лежат в репозитории и являются коммитами."""
-    if not shas:
-        return set()
-    raw = git.out("cat-file", "--batch-check=%(objectname) %(objecttype)", stdin="\n".join(shas) + "\n")
-    found = set()
-    for line in raw.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[1] == "commit":
-            found.add(parts[0])
-    return found
-
-
 # -- patch-id -------------------------------------------------------------
 
 
@@ -248,14 +237,17 @@ def survey(
     # Канал 2: коммит источника сам помечен как перенесённый из коммита,
     # который уже лежит в цели, — так выглядит обратное направление.
     source_trailers = trailer_map(git, profile.ref, limit)
+    # Канал 3: локальный маппинг. Проверяем именно достижимость из целевой
+    # ветки: после reset/rebase/amend объект живёт в репозитории ещё долго,
+    # и `cat-file` нашёл бы висячий коммит, которого в истории уже нет.
     mapped = {src: dst for src, dst in state.mapping.items()}
-    alive = existing_commits(git, sorted(set(mapped.values())))
 
     target_pids: dict[str, str] = {}
     source_pids: dict[str, str] = {}
     if use_patch_id:
         target_pids = patch_ids(git, state, profile.target_branch, window)
         source_pids = patch_ids(git, state, profile.ref, window)
+    hot = set(target_pids) | set(source_pids)
     known_pids = {pid: sha for sha, pid in target_pids.items()}
 
     rows: list[Row] = []
@@ -270,7 +262,7 @@ def survey(
             status, reason = TRANSFERRED, "трейлер в целевой истории"
         elif origin:
             status, reason = TRANSFERRED, f"списан с {origin[:12]}, он уже в цели"
-        elif mapped.get(commit.sha) in alive:
+        elif mapped.get(commit.sha) and target_shas.match(mapped[commit.sha]):
             status, reason = TRANSFERRED, f"перенесён как {mapped[commit.sha][:12]}"
         else:
             pid = source_pids.get(commit.sha)
@@ -278,7 +270,12 @@ def survey(
                 status, reason = SIMILAR, f"patch-id как у {known_pids[pid][:12]}"
         rows.append(Row(number=number, commit=commit, status=status, reason=reason))
 
-    return Survey(rows=rows, source_ref=profile.ref, scanned_target=len(target_pids))
+    return Survey(
+        rows=rows,
+        source_ref=profile.ref,
+        scanned_target=len(target_pids),
+        hot_shas=hot,
+    )
 
 
 def apply_order(git: Git, shas: list[str]) -> list[str]:

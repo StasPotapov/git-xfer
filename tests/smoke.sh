@@ -1,0 +1,208 @@
+#!/bin/sh
+# Сквозной прогон git-xfer на одноразовых репозиториях.
+# Рабочие репозитории не трогает: стенд, конфиг и state живут во временном
+# каталоге, который удаляется в конце.
+#
+#   sh tests/smoke.sh            # прогнать всё
+#   KEEP=1 sh tests/smoke.sh     # оставить стенд для разбора
+set -u
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/.." && pwd)
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/git-xfer-smoke.XXXXXX")
+PASS=0
+FAIL=0
+
+cleanup() {
+  if [ "${KEEP:-0}" = "1" ]; then
+    echo "Стенд оставлен: $WORK"
+  else
+    rm -rf "$WORK"
+  fi
+}
+trap cleanup EXIT
+
+xfer() {
+  XDG_CONFIG_HOME="$WORK/config" XDG_STATE_HOME="$WORK/state" \
+  PYTHONPATH="$ROOT" python3 -m gitxfer "$@"
+}
+
+ok()   { PASS=$((PASS + 1)); printf '  ✓ %s\n' "$1"; }
+bad()  { FAIL=$((FAIL + 1)); printf '  ✗ %s\n' "$1"; }
+check(){ if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (ждали «$1», получили «$2»)"; fi; }
+has()  { if printf '%s\n' "$2" | grep -q -- "$1"; then ok "$3"; else bad "$3"; fi; }
+hasnt(){ if printf '%s\n' "$2" | grep -q -- "$1"; then bad "$3"; else ok "$3"; fi; }
+
+echo "== 1. стенд =="
+sh "$HERE/fixture.sh" "$WORK" >/dev/null || { echo "стенд не собрался"; exit 1; }
+mkdir -p "$WORK/config/git-xfer"
+cat > "$WORK/config/git-xfer/config.toml" <<EOF
+[defaults]
+scan_limit = 50
+patchid_window = 200
+
+[profiles.t]
+source = "$WORK/a"
+source_branch = "master"
+target = "$WORK/b"
+target_branch = "master"
+
+[profiles.t-back]
+source = "$WORK/b"
+source_branch = "master"
+target = "$WORK/a"
+target_branch = "master"
+EOF
+ok "два несвязанных репозитория и конфиг"
+
+echo "== 2. doctor =="
+xfer doctor -p t >/dev/null 2>&1
+check 0 $? "на чистом репозитории зелено"
+# Незавершённый одиночный cherry-pick: каталога .git/sequencer git не создаёт,
+# поэтому ловить его можно только по CHERRY_PICK_HEAD.
+CONF=$(git -C "$WORK/a" log --no-merges --format='%H %s' master | grep 'конфликтует' | cut -d' ' -f1)
+git -C "$WORK/b" -c protocol.file.allow=always fetch -q --no-tags --no-write-fetch-head \
+  -- "$WORK/a" '+refs/heads/master:refs/xfer/probe/head'
+git -C "$WORK/b" cherry-pick "$CONF" >/dev/null 2>&1
+check "" "$(ls "$WORK/b/.git/sequencer" 2>/dev/null)" "sequencer не создан (single_pick)"
+if [ -e "$WORK/b/.git/CHERRY_PICK_HEAD" ]; then ok "CHERRY_PICK_HEAD на месте"; else bad "CHERRY_PICK_HEAD на месте"; fi
+OUT=$(xfer doctor -p t 2>&1); CODE=$?
+check 2 $CODE "doctor блокирует незавершённый cherry-pick"
+has "CHERRY_PICK_HEAD" "$OUT" "блокировка именно по CHERRY_PICK_HEAD"
+git -C "$WORK/b" cherry-pick --abort >/dev/null 2>&1
+git -C "$WORK/b" update-ref -d refs/xfer/probe/head
+# AUTO_MERGE остаётся и после успешного cherry-pick — маркером быть не может.
+CLEAN=$(git -C "$WORK/a" log --no-merges --format='%H %s' master | grep 'новая фича' | cut -d' ' -f1)
+git -C "$WORK/b" cherry-pick "$CLEAN" >/dev/null 2>&1
+xfer doctor -p t >/dev/null 2>&1
+check 0 $? "AUTO_MERGE после чистого cherry-pick не блокирует"
+git -C "$WORK/b" reset -q --hard HEAD~1
+
+echo "== 3. sync =="
+TAGS_BEFORE=$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/tags/)
+xfer sync -p t >/dev/null
+check "$(git -C "$WORK/a" rev-parse master)" "$(git -C "$WORK/b" rev-parse refs/xfer/t/head)" "refs/xfer/t/head создан"
+check "$TAGS_BEFORE" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/tags/)" "refs/tags/* не тронуты"
+check "" "$(git -C "$WORK/b" remote -v)" "remote'ов не прибавилось"
+check "" "$(ls "$WORK/b/.git/FETCH_HEAD" 2>/dev/null)" "FETCH_HEAD не создан"
+
+echo "== 4. list и plan =="
+OUT=$(xfer list -p t)
+has "≈ .*shared.txt" "$OUT" "дубль уже имеющегося изменения помечен ≈"
+hasnt "merge: влили side" "$OUT" "merge-коммит по умолчанию не показан"
+has "merge: влили side" "$(xfer list -p t --allow-merges)" "--allow-merges показывает merge-коммит"
+PLAN=$(xfer plan -p t --commits 3,4,5,6,7)
+has "✗ .*конфликтует" "$PLAN" "plan предсказал конфликт там, где он есть"
+has "станет пустым" "$PLAN" "plan предсказал пустой коммит"
+check "" "$(git -C "$WORK/b" status --porcelain=v2)" "plan не тронул рабочее дерево"
+
+echo "== 5. apply с конфликтом и continue =="
+OUT=$(xfer apply -p t --commits 3,4,5,6,7 --yes 2>&1); CODE=$?
+check 3 $CODE "остановились на конфликте с кодом 3"
+printf 'l1\nl2\nRESOLVED\nl4\nl5\n' > "$WORK/b/src/app.py"
+git -C "$WORK/b" add src/app.py
+OUT=$(xfer continue -p t 2>&1); CODE=$?
+check 0 $CODE "continue довёл очередь до конца"
+LOG=$(git -C "$WORK/b" log -5 --format='%H %an %ad' --date=short)
+has "Ann Source 2024-02-05" "$LOG" "автор и author date сохранены"
+BODY=$(git -C "$WORK/b" log -4 --format='%B')
+COUNT=$(printf '%s\n' "$BODY" | grep -c "cherry picked from commit")
+check 4 "$COUNT" "трейлер есть у всех четырёх, включая конфликтный"
+
+echo "== 6. abort оставляет уже перенесённое =="
+printf 'helper\n' > "$WORK/a/src/helper.py"
+git -C "$WORK/a" add src/helper.py
+git -C "$WORK/a" -c user.name=Ann -c user.email=ann@example.com commit -q -m "src: helper"
+printf 'def feature():\n    return 99\n' > "$WORK/a/src/feature.py"
+git -C "$WORK/a" -c user.name=Ann -c user.email=ann@example.com commit -q -am "src: feature=99"
+printf 'def feature():\n    return 7\n' > "$WORK/b/src/feature.py"
+git -C "$WORK/b" -c user.name=Bob -c user.email=bob@example.com commit -q -am "tgt: feature=7"
+xfer sync -p t >/dev/null
+BEFORE=$(git -C "$WORK/b" rev-parse HEAD)
+xfer apply -p t --commits 1,2 --yes >/dev/null 2>&1
+check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "первый коммит серии применён"
+xfer abort -p t >/dev/null
+check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "abort откатил только текущий коммит"
+check "" "$(git -C "$WORK/b" status --porcelain=v2)" "после abort дерево чистое"
+
+echo "== 7. skip не принимает уехавший HEAD =="
+xfer apply -p t --commits 1 --yes >/dev/null 2>&1
+git -C "$WORK/b" cherry-pick --abort >/dev/null 2>&1
+git -C "$WORK/b" reset -q --hard HEAD~1
+OUT=$(xfer skip -p t 2>&1); CODE=$?
+check 1 $CODE "skip отказался работать поверх чужого HEAD"
+has "HEAD ушёл не туда" "$OUT" "и сказал об этом внятно"
+xfer cleanup -p t --state >/dev/null 2>&1
+
+echo "== 8. повторный list и cleanup =="
+xfer sync -p t >/dev/null
+OUT=$(xfer list -p t)
+has "− .*бинарный ассет" "$OUT" "перенесённый коммит помечен − по трейлеру"
+xfer cleanup -p t >/dev/null
+check "" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)" "refs/xfer/* убраны"
+
+echo "== 9. non-TTY =="
+OUT=$(xfer apply -p t < /dev/null 2>&1); CODE=$?
+check 1 $CODE "без выбора и без терминала — ошибка, а не зависание"
+has "stdin не терминал" "$OUT" "и сказано, что делать"
+OUT=$(xfer apply -p t -i < /dev/null 2>&1); CODE=$?
+check 1 $CODE "-i без терминала — ошибка"
+
+echo "== 10. обратное направление =="
+xfer doctor -p t-back >/dev/null 2>&1
+check 0 $? "зеркальный профиль готов"
+OUT=$(xfer list -p t-back)
+has "−" "$OUT" "перенесённое опознано и с обратной стороны"
+
+echo "== 11. --dry-run и коды выхода =="
+OUT=$(xfer -n apply -p t --commits 1 --yes 2>&1); CODE=$?
+check 1 $CODE "apply под --dry-run отказывается"
+has "git xfer plan" "$OUT" "и отправляет в plan"
+BEFORE=$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)
+OUT=$(xfer -n cleanup -p t 2>&1)
+hasnt "^Удалён" "$OUT" "cleanup под --dry-run не рапортует об удалении"
+check "$BEFORE" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)" "и ничего не удалил"
+xfer cleanup -p t >/dev/null 2>&1
+OUT=$(xfer -n plan -p t --commits 1 2>&1); CODE=$?
+check 1 $CODE "plan под --dry-run без объектов — внятная ошибка"
+has "git xfer sync" "$OUT" "и говорит, что выполнить"
+xfer такой-подкоманды-нет >/dev/null 2>&1
+check 1 $? "ошибка разбора аргументов не занимает код 2"
+
+echo "== 12. маппинг проверяет достижимость, а не существование =="
+xfer cleanup -p t --state >/dev/null 2>&1
+printf 'unique-%s\n' "$$" > "$WORK/a/unique.txt"
+git -C "$WORK/a" add unique.txt
+git -C "$WORK/a" -c user.name=Ann -c user.email=ann@example.com commit -q -m "src: уникальный коммит"
+xfer sync -p t >/dev/null
+SHA=$(git -C "$WORK/a" rev-parse master)
+xfer apply -p t --sha "$SHA" --yes >/dev/null 2>&1
+check 0 $? "чистый коммит перенесён"
+if grep -q "\"$SHA\"" "$WORK"/state/git-xfer/*.json; then
+  ok "маппинг src→dst записан в state"
+else
+  bad "маппинг src→dst записан в state"
+fi
+# Коммит убран из истории, но объект жив: cat-file нашёл бы его и соврал.
+git -C "$WORK/b" reset -q --hard HEAD~1
+OUT=$(xfer list -p t --limit 5)
+if printf '%s\n' "$OUT" | grep -q "+ .*уникальный коммит"; then
+  ok "откаченный коммит снова показан как новый"
+else
+  bad "откаченный коммит снова показан как новый"
+  printf '%s\n' "$OUT" | sed 's/^/      /'
+fi
+
+echo "== 13. алиасы профилей не схлопываются =="
+ALIASES=$(PYTHONPATH="$ROOT" python3 -c '
+from pathlib import Path
+from gitxfer.config import Profile
+mk = lambda n: Profile(n, Path("/s"), "m", Path("/t"), "m", 10, 10).alias
+print(mk("proj"), mk("proj/back"), mk("proj-back"))')
+set -- $ALIASES
+check "proj" "$1" "простое имя остаётся как есть"
+if [ "$2" = "$3" ]; then bad "proj/back и proj-back дают разные ref"; else ok "proj/back и proj-back дают разные ref"; fi
+
+echo
+echo "Проверок пройдено: $PASS, провалено: $FAIL"
+[ "$FAIL" -eq 0 ]

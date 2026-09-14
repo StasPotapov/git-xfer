@@ -27,7 +27,8 @@ BUSY_MARKERS: tuple[tuple[str, str], ...] = (
     ("CHERRY_PICK_HEAD", "не завершён cherry-pick (git cherry-pick --abort)"),
     ("REVERT_HEAD", "не завершён revert (git revert --abort)"),
     ("MERGE_HEAD", "не завершён merge (git merge --abort)"),
-    ("AUTO_MERGE", "остался незавершённый merge-ort (git merge --abort)"),
+    # AUTO_MERGE сюда не входит: git 2.54 оставляет его и после успешного
+    # cherry-pick, это кэш merge-ort, а не признак незавершённой операции.
     ("rebase-merge", "идёт rebase (git rebase --abort)"),
     ("rebase-apply", "идёт rebase/am (git rebase --abort или git am --abort)"),
     ("BISECT_LOG", "идёт bisect (git bisect reset)"),

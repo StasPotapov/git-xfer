@@ -232,6 +232,21 @@ def _load_progress(state: State, profile: Profile) -> Progress:
     return progress
 
 
+def _drift_error(progress: Progress, head: str) -> StateError:
+    return StateError(
+        "пока перенос стоял на паузе, HEAD ушёл не туда:\n"
+        f"  оставляли {progress.expected_head[:12]}, сейчас {head[:12] or '—'}\n"
+        "Гадать, что из этого перенос, мы не будем. Разберитесь руками; "
+        "забыть незавершённую серию: git xfer cleanup --state"
+    )
+
+
+def _require_expected_head(git: Git, progress: Progress) -> None:
+    head = head_sha(git) or ""
+    if head != progress.expected_head:
+        raise _drift_error(progress, head)
+
+
 def _one_commit_ahead(git: Git, base: str, head: str) -> bool:
     """Ровно один коммит поверх `base` — так выглядит ручной коммит разрешения."""
     if not base or not head:
@@ -271,6 +286,11 @@ def resume(
         if skip:
             if in_pick:
                 git.run("cherry-pick", "--skip", check=False, mutating=True)
+            else:
+                # Без активного cherry-pick пропускать можно только с того
+                # места, где перенос встал: иначе очередь поедет поверх
+                # чужого HEAD, а уже перенесённые коммиты тихо пропадут.
+                _require_expected_head(git, progress)
             _record(state, progress, outcome, current, SKIPPED, "", detail="пропущен вручную")
             report(f"  {current[:12]} пропущен")
         elif in_pick:
@@ -298,12 +318,7 @@ def resume(
                 _record(state, progress, outcome, current, OK, head, detail="закоммичен вручную")
                 report(f"  {current[:12]} уже закоммичен вручную ({head[:12]})")
             else:
-                raise StateError(
-                    "пока перенос стоял на паузе, HEAD ушёл не туда:\n"
-                    f"  оставляли {progress.expected_head[:12]}, сейчас {head[:12] or '—'}\n"
-                    "Гадать, что из этого перенос, мы не будем. Разберитесь руками; "
-                    "забыть незавершённую серию: git xfer cleanup --state"
-                )
+                raise _drift_error(progress, head)
         progress.expected_head = head_sha(git) or progress.expected_head
         state.save()
     else:
