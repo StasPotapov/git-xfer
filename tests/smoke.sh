@@ -440,6 +440,27 @@ for CMD in init doctor sync list plan apply continue skip abort status cleanup; 
   fi
 done
 
+echo "== 28. текущего каталога больше нет =="
+# Так бывает после переноса или удаления каталога, в котором стоит шелл:
+# os.getcwd() начинает бросать FileNotFoundError.
+GONE="$WORK/gone"
+mkdir -p "$GONE"
+OUT=$(cd "$GONE" && rmdir "$GONE" && PYTHONPATH="$ROOT" XDG_CONFIG_HOME="$WORK/config" \
+      XDG_STATE_HOME="$WORK/state" python3 -m gitxfer --version 2>&1); CODE=$?
+check 0 $CODE "утилита запускается из исчезнувшего каталога"
+hasnt "Traceback" "$OUT" "без трейсбека"
+has "git-xfer" "$OUT" "и отвечает по делу"
+mkdir -p "$GONE"
+OUT=$(cd "$GONE" && rmdir "$GONE" && PYTHONPATH="$ROOT" XDG_CONFIG_HOME="$WORK/config" \
+      XDG_STATE_HOME="$WORK/state" python3 -m gitxfer list -p t --to b 2>&1); CODE=$?
+check 0 $CODE "и полноценная команда тоже"
+hasnt "FileNotFoundError" "$OUT" "FileNotFoundError наружу не вылезает"
+if grep -q "каталога больше нет" "$WORK/state/git-xfer/git-xfer.log"; then
+  ok "журнал отметил, что каталога нет"
+else
+  bad "журнал отметил, что каталога нет"
+fi
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]

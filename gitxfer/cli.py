@@ -778,12 +778,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     # Настройки журнала читаем до его открытия: иначе в выключенный
     # журнал успела бы попасть шапка прогона.
-    from_config, config_file = log_settings(args.config)
-    logbook.setup(
-        enabled=not args.no_log and (from_config or bool(args.log_file)),
-        file=args.log_file or config_file,
-    )
-    logbook.run_header(list(argv if argv is not None else sys.argv[1:]), __version__)
+    try:
+        from_config, config_file = log_settings(args.config)
+        logbook.setup(
+            enabled=not args.no_log and (from_config or bool(args.log_file)),
+            file=args.log_file or config_file,
+        )
+        logbook.run_header(list(argv if argv is not None else sys.argv[1:]), __version__)
+    except OSError as exc:
+        # Журнал — удобство. Что бы с ним ни случилось, работу это
+        # останавливать не должно.
+        logbook.disable()
+        eprint(f"git-xfer: журнал не ведётся ({exc})")
     code = EXIT_OK
     try:
         code = args.func(args)

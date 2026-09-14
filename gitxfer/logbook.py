@@ -91,7 +91,20 @@ def error(message: str, *args, exc_info: bool = False) -> None:
     _log.error(message, *args, exc_info=exc_info)
 
 
+def safe_cwd() -> str:
+    """Текущий каталог, даже если его уже нет.
+
+    `os.getcwd()` бросает FileNotFoundError, когда каталог, в котором стоит
+    шелл, удалили или переименовали, — а это ровно то, что бывает после
+    переноса клона. Журнал не имеет права ронять прогон из-за такой мелочи.
+    """
+    try:
+        return os.getcwd()
+    except OSError:
+        return "<каталога больше нет>"
+
+
 def run_header(argv: list[str], version: str) -> None:
     info("=" * 60)
     info("git-xfer %s: %s", version, " ".join(argv))
-    info("cwd=%s python=%s", os.getcwd(), sys.version.split()[0])
+    info("cwd=%s python=%s", safe_cwd(), sys.version.split()[0])

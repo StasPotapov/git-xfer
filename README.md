@@ -129,6 +129,11 @@ PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p myproj --to b
 (на macOS системный обычно 3.9). Ставьте через `uv`/`pipx`, они
 фиксируют интерпретатор, либо зовите `python3.11 -m gitxfer …`.
 
+**`FileNotFoundError` из `os.getcwd()`** — каталог, в котором стоит
+терминал, переехал или удалён (частый случай: распаковали в `~/Downloads`,
+потом перенесли в `~/Development`, а шелл остался в старом). Достаточно
+`cd` в существующий каталог. Свежие версии этим не падают.
+
 **Что-то упало непонятно** — есть журнал: путь покажет `git-xfer status`,
 по умолчанию `~/.local/state/git-xfer/git-xfer.log`. Там каждый вызов git
 с кодом возврата и полный трейсбек последней ошибки.
@@ -538,7 +543,7 @@ git -C <TARGET> -c protocol.file.allow=always \
 во временном каталоге и удаляется в конце:
 
 ```bash
-sh tests/smoke.sh          # 122 проверки
+sh tests/smoke.sh          # 128 проверок
 KEEP=1 sh tests/smoke.sh   # оставить стенд для разбора
 ```
 
