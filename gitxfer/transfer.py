@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
+from . import logbook
 from .config import Profile
 from .errors import EXIT_CONFLICT, EXIT_OK, StateError, XferError
 from .gitcmd import Git, GitResult
@@ -142,13 +143,18 @@ def _drain(
         index = len(progress.done) + 1
         subject = git.out("show", "-s", "--format=%s", sha)
         report(f"[{index}/{total}] {sha[:12]} {subject}")
+        logbook.info("шаг %d/%d: беру %s %s", index, total, sha, subject)
         status, result, head = pick(git, sha, options)
+        logbook.info("шаг %d/%d: %s → %s", index, total, status, head or "HEAD не сдвинулся")
         if status == CONFLICT:
             progress.expected_head = head
             state.in_progress = progress
             state.save()
             outcome.conflict = sha
             outcome.remaining = list(progress.queue)
+            logbook.warn(
+                "конфликт на %s; в очереди осталось %d", sha, len(progress.queue)
+            )
             report("  конфликт — разрешите его и выполните: git xfer continue")
             report(result.stdout.strip() or result.stderr.strip())
             return outcome
@@ -157,6 +163,7 @@ def _drain(
             progress.current = None
             state.in_progress = progress
             state.save()
+            logbook.error("cherry-pick %s не удался: %s", sha, result.describe())
             raise XferError(f"cherry-pick {sha[:12]} не удался:\n{result.describe()}")
         _record(state, progress, outcome, sha, status, head)
         if status == EMPTY:
@@ -217,6 +224,10 @@ def start(
     )
     state.in_progress = progress
     state.save()
+    logbook.info(
+        "серия: %d коммит(ов), профиль %s, HEAD до начала %s",
+        len(shas), profile.name, head,
+    )
     return _drain(git, state, progress, options, Outcome(), report)
 
 

@@ -214,21 +214,31 @@ def survey(
     state: State,
     *,
     limit: int | None = None,
-    window: int | None = None,
+    dedup_window: int | None = None,
+    patchid_window: int | None = None,
     allow_merges: bool = False,
     use_patch_id: bool = True,
 ) -> Survey:
-    """Собрать таблицу коммитов источника с пометками +/≈/−."""
+    """Собрать таблицу коммитов источника с пометками +/≈/−.
+
+    Окна намеренно разные. `dedup_window` — надёжные каналы (трейлер,
+    маппинг): читается быстро, и от него зависит, на сколько своих коммитов
+    назад мы помним, что уже переносили. `patchid_window` — эвристика `≈`:
+    считается дольше, поэтому окно меньше, а результат кэшируется.
+    """
     limit = limit or profile.scan_limit
-    window = window or profile.patchid_window
+    dedup_window = dedup_window or profile.dedup_window
+    patchid_window = patchid_window or profile.patchid_window
     commits = read_log(git, profile.ref, limit, allow_merges=allow_merges)
 
     # Хеши целевой ветки в окне — по ним и сверяемся.
-    target_shas = ShaSet(set(git.lines("rev-list", "-n", str(window), profile.target_branch, "--")))
+    target_shas = ShaSet(
+        set(git.lines("rev-list", "-n", str(dedup_window), profile.target_branch, "--"))
+    )
     # Канал 1: целевая история сама говорит, откуда её коммиты списаны.
     picked_here: set[str] = set()
     picked_short: list[str] = []
-    for refs in trailer_map(git, profile.target_branch, window).values():
+    for refs in trailer_map(git, profile.target_branch, dedup_window).values():
         for sha in refs:
             if len(sha) >= 40:
                 picked_here.add(sha)
@@ -245,8 +255,9 @@ def survey(
     target_pids: dict[str, str] = {}
     source_pids: dict[str, str] = {}
     if use_patch_id:
-        target_pids = patch_ids(git, state, profile.target_branch, window)
-        source_pids = patch_ids(git, state, profile.ref, window)
+        target_pids = patch_ids(git, state, profile.target_branch, patchid_window)
+        # Со стороны источника patch-id нужны только для показанных строк.
+        source_pids = patch_ids(git, state, profile.ref, limit)
     hot = set(target_pids) | set(source_pids)
     known_pids = {pid: sha for sha, pid in target_pids.items()}
 

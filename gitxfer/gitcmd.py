@@ -13,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from . import logbook
 from .errors import EXIT_GIT, XferError
 
 GIT = "git"
@@ -126,6 +128,7 @@ class Git:
                 print(f"[dry-run] {' '.join(shlex.quote(a) for a in argv)}")
             return GitResult(tuple(args), 0, "", "")
         self._trace(argv)
+        started = time.monotonic()
         proc = subprocess.run(
             argv,
             shell=False,
@@ -137,6 +140,18 @@ class Git:
             env=self._env(env),
         )
         result = GitResult(tuple(args), proc.returncode, proc.stdout, proc.stderr)
+        spent = time.monotonic() - started
+        logbook.debug(
+            "git %s → %d за %.2f с (%s)",
+            " ".join(shlex.quote(a) for a in args),
+            result.returncode,
+            spent,
+            self.repo,
+        )
+        if not result.ok:
+            tail = (result.stderr.strip() or result.stdout.strip())[:2000]
+            if tail:
+                logbook.debug("  stderr: %s", tail)
         if check and not result.ok:
             raise GitError(result)
         return result

@@ -6,8 +6,18 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import __version__
-from .config import Config, Profile, config_path, load_config, write_template
+from . import __version__, logbook
+from .config import (
+    DEFAULT_DEDUP_WINDOW,
+    DEFAULT_PATCHID_WINDOW,
+    DEFAULT_SCAN_LIMIT,
+    Profile,
+    adhoc_profile,
+    config_path,
+    load_config,
+    log_settings,
+    write_template,
+)
 from .discover import (
     NEW,
     SIMILAR,
@@ -22,6 +32,7 @@ from .discover import (
 )
 from .errors import (
     EXIT_INTERRUPT,
+    ConfigError,
     EXIT_OK,
     EXIT_PREFLIGHT,
     EXIT_USAGE,
@@ -42,12 +53,171 @@ def eprint(text: str = "") -> None:
 # -- контекст выполнения --------------------------------------------------
 
 
+def _pick(title: str, options: list[tuple[str, str]], default: int = 1) -> int:
+    """Показать пронумерованный список и вернуть выбранный номер (с единицы)."""
+    print(title)
+    for number, (label, detail) in enumerate(options, start=1):
+        print(f"  {number}. {label}")
+        if detail:
+            print(f"     {detail}")
+    while True:
+        answer = input(f"  выбор [{default}]: ").strip()
+        if not answer:
+            return default
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer)
+        print(f"    нужно число от 1 до {len(options)}")
+
+
+def _choose_pair(config, args: argparse.Namespace):
+    """Профиль: из -p, единственный в конфиге, или спросить."""
+    if args.profile:
+        return config.pair(args.profile)
+    names = sorted(config.profiles)
+    if len(names) == 1:
+        return config.profiles[names[0]]
+    if not sys.stdin.isatty():
+        raise ConfigError(
+            "не указан профиль (-p/--profile). Доступны: " + ", ".join(names)
+        )
+    options = []
+    for name in names:
+        pair = config.profiles[name]
+        branches = (
+            pair.a.branch
+            if pair.a.branch == pair.b.branch
+            else f"{pair.a.branch} / {pair.b.branch}"
+        )
+        options.append((name, f"{pair.a.path} ↔ {pair.b.path}  ({branches})"))
+    return config.profiles[names[_pick("Профиль:", options) - 1]]
+
+
+def _choose_direction(pair, args: argparse.Namespace) -> str:
+    """Сторона, в которую переносим: из --to, из старого формата, или спросить."""
+    if args.to:
+        return args.to
+    if pair.implied:
+        return pair.implied
+    if not sys.stdin.isatty():
+        raise XferError(
+            f"профиль {pair.name!r} описывает пару репозиториев — укажите "
+            "направление: --to a или --to b"
+        )
+    options = [
+        (f"{pair.a.path} ({pair.a.branch})  →  {pair.b.path} ({pair.b.branch})", ""),
+        (f"{pair.b.path} ({pair.b.branch})  →  {pair.a.path} ({pair.a.branch})", ""),
+    ]
+    return "b" if _pick("Куда переносим:", options) == 1 else "a"
+
+
+def _current_branch(path: Path | None) -> str | None:
+    """Какая ветка сейчас выгружена — годится как подсказка в опросе."""
+    if not path or not Path(path).expanduser().exists():
+        return None
+    probe = Git(Path(path).expanduser())
+    return probe.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False).text or None
+
+
+def _ask(label: str, default: str | None) -> str:
+    suffix = f" [{default}]" if default else ""
+    while True:
+        answer = input(f"  {label}{suffix}: ").strip()
+        if answer:
+            return answer
+        if default:
+            return default
+        print("    нужно значение")
+
+
+def _ask_setup(
+    source: Path | None, source_branch: str | None, target: Path | None, target_branch: str | None
+) -> tuple[Path, str, Path, str]:
+    """Спросить направление целиком. Ветка цели по умолчанию — та же, что у источника."""
+    print("Откуда и куда переносим:")
+    source = Path(_ask("репозиторий-источник", str(source) if source else None)).expanduser()
+    source_branch = _ask("ветка источника", source_branch or _current_branch(source))
+    target = Path(_ask("целевой репозиторий", str(target) if target else None)).expanduser()
+    target_branch = _ask(
+        "ветка цели", target_branch or _current_branch(target) or source_branch
+    )
+    return source, source_branch, target, target_branch
+
+
+def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
+    """Собрать направление из конфига, флагов и — если надо — вопросов.
+
+    Профиль в конфиге описывает ПАРУ репозиториев; направление выбирается
+    здесь: `--to b` тащит из a в b, `--to a` — обратно.
+    """
+    base: Profile | None = None
+    config = None
+    adhoc = bool(getattr(args, "source", None) and getattr(args, "target", None))
+    try:
+        config = load_config(args.config)
+        # При --ask без профиля спрашивать ещё и профиль незачем: человек
+        # и так сейчас назовёт оба репозитория и обе ветки руками.
+        if not (args.ask and not args.profile):
+            pair = _choose_pair(config, args)
+            base = pair.direction(_choose_direction(pair, args))
+    except ConfigError:
+        # Конфига может не быть вовсе — если всё задано флагами или спросим.
+        if args.profile or not (adhoc or args.ask):
+            raise
+
+    source = args.source or (base.source if base else None)
+    target = args.target or (base.target if base else None)
+    # Одна ветка на обе стороны — самый частый разовый случай.
+    src_branch = args.source_branch or args.branch
+    dst_branch = args.target_branch or args.branch
+    # Указали только одну сторону — вторая называется так же.
+    src_branch = src_branch or dst_branch
+    dst_branch = dst_branch or src_branch
+    src_branch = src_branch or (base.source_branch if base else None)
+    dst_branch = dst_branch or (base.target_branch if base else None)
+
+    if args.ask or not (source and target and src_branch and dst_branch):
+        if not sys.stdin.isatty():
+            raise XferError(
+                "не хватает данных о направлении, а stdin не терминал. "
+                "Задайте профиль (-p) или --source/--target и --branch"
+            )
+        source, src_branch, target, dst_branch = _ask_setup(
+            source, src_branch, target, dst_branch
+        )
+
+    base_name = base.name if base else "adhoc"
+    changed = base is None or (
+        Path(source) != base.source
+        or Path(target) != base.target
+        or src_branch != base.source_branch
+        or dst_branch != base.target_branch
+    )
+    profile = adhoc_profile(
+        name=base_name if not changed else f"{base_name}@{src_branch}",
+        source=Path(source),
+        source_branch=src_branch,
+        target=Path(target),
+        target_branch=dst_branch,
+        scan_limit=base.scan_limit if base else DEFAULT_SCAN_LIMIT,
+        dedup_window=base.dedup_window if base else DEFAULT_DEDUP_WINDOW,
+        patchid_window=base.patchid_window if base else DEFAULT_PATCHID_WINDOW,
+    )
+    return profile, config
+
+
+def describe(profile: Profile) -> str:
+    return (
+        f"Направление: {profile.source} ({profile.source_branch})\n"
+        f"          →  {profile.target} ({profile.target_branch})"
+    )
+
+
 class Context:
-    """Профиль + пара Git-обёрток + state: всё, что нужно подкоманде."""
+    """Направление + пара Git-обёрток + state: всё, что нужно подкоманде."""
 
     def __init__(self, args: argparse.Namespace) -> None:
-        self.config: Config = load_config(args.config)
-        self.profile: Profile = self.config.profile(args.profile)
+        self.profile, self.config = resolve_profile(args)
+        logbook.info("направление: %s", self.profile.describe_short())
         self.target = Git(self.profile.target, dry_run=args.dry_run, verbose=args.verbose)
         self.source = Git(self.profile.source, dry_run=args.dry_run, verbose=args.verbose)
         self.state = State.load(self.profile.target)
@@ -159,8 +329,8 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     context = Context(args)
     profile = context.profile
-    print(f"Профиль {profile.name}: {profile.source} ({profile.source_branch})")
-    print(f"           → {profile.target} ({profile.target_branch})")
+    print(f"Профиль: {profile.name}")
+    print(describe(profile))
     report = run_preflight(context.target, context.source, profile)
     print(report.render())
     if context.state.in_progress:
@@ -330,8 +500,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     context = Context(args)
     profile = context.profile
     progress = context.state.in_progress
-    print(f"Профиль {profile.name}: {profile.source} → {profile.target}")
-    print(f"State: {state_path(profile.target)}")
+    print(f"Профиль: {profile.name}")
+    print(describe(profile))
+    print(f"State:   {state_path(profile.target)}")
+    print(f"Журнал:  {logbook.path() or 'выключен'}")
     if not progress:
         print("Незавершённого переноса нет")
         return EXIT_OK
@@ -382,8 +554,35 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 # -- разбор аргументов ----------------------------------------------------
 
 
+def _add_repo_flags(parser: argparse.ArgumentParser) -> None:
+    """Направление и разовые переопределения — без правки конфига."""
+    group = parser.add_argument_group("направление")
+    group.add_argument(
+        "--to",
+        choices=("a", "b"),
+        help="в какую сторону пары переносим; без флага спросим",
+    )
+    group.add_argument(
+        "-b", "--branch", metavar="NAME", help="ветка с обеих сторон, разово"
+    )
+    group.add_argument("--source-branch", metavar="NAME", help="ветка источника")
+    group.add_argument(
+        "--target-branch", metavar="NAME", help="ветка цели (по умолчанию та же)"
+    )
+    group.add_argument(
+        "--source", type=Path, metavar="PATH", help="репозиторий-источник, мимо конфига"
+    )
+    group.add_argument(
+        "--target", type=Path, metavar="PATH", help="целевой репозиторий, мимо конфига"
+    )
+    group.add_argument(
+        "--ask", action="store_true", help="спросить репозитории и ветки интерактивно"
+    )
+
+
 def _add_profile(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-p", "--profile", help="имя профиля из конфига")
+    _add_repo_flags(parser)
 
 
 def _add_selection(parser: argparse.ArgumentParser) -> None:
@@ -434,6 +633,19 @@ def _add_common(parser: argparse.ArgumentParser, *, after_command: bool) -> None
         action="store_true",
         default=hidden if after_command else False,
         help="не выполнять команды, меняющие репозиторий",
+    )
+    parser.add_argument(
+        "--no-log",
+        action="store_true",
+        default=hidden if after_command else False,
+        help="не вести журнал прогона",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=hidden if after_command else None,
+        metavar="PATH",
+        help="куда писать журнал (по умолчанию рядом со state)",
     )
 
 
@@ -518,20 +730,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _log_hint() -> str:
+    path = logbook.path()
+    return f"\nПодробности прогона: {path}" if path else ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Настройки журнала читаем до его открытия: иначе в выключенный
+    # журнал успела бы попасть шапка прогона.
+    from_config, config_file = log_settings(args.config)
+    logbook.setup(
+        enabled=not args.no_log and (from_config or bool(args.log_file)),
+        file=args.log_file or config_file,
+    )
+    logbook.run_header(list(argv if argv is not None else sys.argv[1:]), __version__)
+    code = EXIT_OK
     try:
-        return args.func(args)
+        code = args.func(args)
+        return code
     except XferError as exc:
-        eprint(f"git-xfer: {exc}")
-        return exc.exit_code
+        logbook.error("%s", exc, exc_info=True)
+        eprint(f"git-xfer: {exc}{_log_hint()}")
+        code = exc.exit_code
+        return code
     except KeyboardInterrupt:
+        logbook.warn("прервано с клавиатуры")
         eprint()
         eprint("git-xfer: прервано")
-        return EXIT_INTERRUPT
+        code = EXIT_INTERRUPT
+        return code
     except BrokenPipeError:
         return EXIT_OK
+    except Exception:
+        logbook.error("непредвиденная ошибка", exc_info=True)
+        raise
+    finally:
+        logbook.info("выход с кодом %s", code)
 
 
 if __name__ == "__main__":
