@@ -203,6 +203,22 @@ set -- $ALIASES
 check "proj" "$1" "простое имя остаётся как есть"
 if [ "$2" = "$3" ]; then bad "proj/back и proj-back дают разные ref"; else ok "proj/back и proj-back дают разные ref"; fi
 
+echo "== 14. запуск на старом python =="
+OLD=""
+for CAND in /usr/bin/python3 python3.10 python3.9 python3.8; do
+  command -v "$CAND" >/dev/null 2>&1 || continue
+  VER=$("$CAND" -c 'import sys; print(sys.version_info[0] * 100 + sys.version_info[1])' 2>/dev/null) || continue
+  if [ "$VER" -lt 311 ]; then OLD="$CAND"; break; fi
+done
+if [ -n "$OLD" ]; then
+  OUT=$(PYTHONPATH="$ROOT" "$OLD" -m gitxfer --version 2>&1); CODE=$?
+  check 1 $CODE "код выхода 1, а не трейсбек"
+  has "нужен Python 3.11" "$OUT" "сказано, какая версия нужна"
+  hasnt "ModuleNotFoundError" "$OUT" "ModuleNotFoundError наружу не вылезает"
+else
+  ok "python старше 3.11 на машине не нашёлся — проверку пропускаем"
+fi
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]
