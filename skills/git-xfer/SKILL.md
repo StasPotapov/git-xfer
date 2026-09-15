@@ -22,18 +22,17 @@ command -v git-xfer && git-xfer --version
 python3 --version              # нужен 3.11 или новее
 ```
 
-Нет команды — поставь из репозитория `StasPotapov/git-xfer`. Он **приватный**:
-анонимный `https`-клон не пройдёт, нужен доступ у человека. **Спроси, куда
-клонировать и каким способом ставить** — это изменение его окружения:
+Нет команды — поставь из репозитория `StasPotapov/git-xfer`. Он открытый,
+доступ не нужен. **Спроси, куда ставить и каким способом** — это изменение
+окружения человека:
 
 ```bash
-gh repo clone StasPotapov/git-xfer <куда>          # если есть gh
-git clone git@github.com:StasPotapov/git-xfer.git <куда>   # или по SSH
+# способ 1 — прямо из репозитория, если есть uv или pipx
+# (они фиксируют интерпретатор):
+uv tool install git+https://github.com/StasPotapov/git-xfer
 
-# способ 1 — если есть uv или pipx (фиксируют интерпретатор):
-uv tool install <куда>
-
-# способ 2 — симлинком, без установки:
+# способ 2 — клон и симлинк, без установки:
+git clone https://github.com/StasPotapov/git-xfer.git <куда>
 mkdir -p ~/.local/bin && ln -s <куда>/bin/git-xfer ~/.local/bin/git-xfer
 ```
 
@@ -293,7 +292,6 @@ git -C <цель> grep -n '^<<<<<<<\|^>>>>>>>' -- <файл>
 | `attempted relative import with no known parent package` | запустили файл пакета напрямую; нужно `python3 -m gitxfer` или `bin/git-xfer` |
 | `нужен Python 3.11 или новее` | `python3` в `PATH` старый; ставить через `uv`/`pipx` или звать `python3.11 -m gitxfer` |
 | `FileNotFoundError` из `os.getcwd()` | каталог, где стоит терминал, удалён или переехал — сделай `cd` в существующий |
-| `Repository not found` при клоне | репозиторий приватный — нужен доступ, `gh auth status` покажет, есть ли он |
 | `конфиг не найден` | `git-xfer init` и заполнить, либо работать через `--source`/`--target` |
 | `не описан ни один профиль` | шаблон создан, но профили не вписаны |
 | код `2` на `doctor` | репозиторий не готов; причина в выводе, разбери с человеком |
