@@ -91,8 +91,8 @@ resolve_conflicts = "mechanical"
 #
 # [profiles.myapp]
 # a = "/path/to/monorepo"
-# a_prefix = "apps/mobile"   # относительно корня репо, без слеша впереди
-# b = "/path/to/personal-repo"    # тут проект в корне — b_prefix не нужен
+# a_prefix = "apps/mobile"       # относительно корня репо, без слеша впереди
+# b = "/path/to/personal-repo"   # тут проект в корне — b_prefix не нужен
 # branch = "master"
 #
 # Коммит, не задевший подкаталог, в список не попадает вовсе. Коммит,
