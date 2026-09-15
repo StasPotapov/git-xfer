@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import Profile
 from .errors import PreflightError
 from .gitcmd import Git, GitError
+from .prefix import NotATree, subtree
 
 OK = "ok"
 WARN = "warn"
@@ -123,9 +124,10 @@ def untracked(git: Git) -> list[str]:
     return [line for line in result.lines() if line.startswith("? ")]
 
 
-def stale_xfer_refs(git: Git, keep: str | None = None) -> list[str]:
+def stale_xfer_refs(git: Git, keep: str | tuple[str, ...] | None = None) -> list[str]:
+    kept = (keep,) if isinstance(keep, str) else tuple(keep or ())
     refs = git.lines("for-each-ref", "--format=%(refname)", "refs/xfer/")
-    return [ref for ref in refs if ref != keep]
+    return [ref for ref in refs if ref not in kept]
 
 
 # -- собственно проверки --------------------------------------------------
@@ -242,8 +244,12 @@ def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: 
             f"источник {crlf_source}, цель {crlf_target} — переводы строк поедут, patch-id разойдутся",
         )
 
-    attrs_target = (profile.target / ".gitattributes").exists()
-    attrs_source = (profile.source / ".gitattributes").exists()
+    # Смотрим в подкаталог проекта, а не в корень: у монорепозитория свой
+    # .gitattributes в корне к переносимым файлам отношения не имеет.
+    target_root = profile.target / profile.target_prefix
+    source_root = profile.source / profile.source_prefix
+    attrs_target = (target_root / ".gitattributes").exists()
+    attrs_source = (source_root / ".gitattributes").exists()
     if attrs_target != attrs_source:
         report.add(
             ".gitattributes",
@@ -251,16 +257,74 @@ def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: 
             "есть только в одном из репозиториев — нормализация текста разойдётся",
         )
 
+    # .gitmodules git читает только из корня рабочего дерева — файла
+    # <repo>/<prefix>/.gitmodules не бывает, и искать его там нельзя.
     if (profile.target / ".gitmodules").exists() or (profile.source / ".gitmodules").exists():
         report.add("сабмодули", WARN, "cherry-pick переносит только гитлинк, содержимое — руками")
 
-    stale = stale_xfer_refs(git_target, keep=profile.ref)
+    stale = stale_xfer_refs(git_target, keep=(profile.ref, profile.pick_ref))
     if stale:
         report.add(
             "refs/xfer",
             WARN,
             f"остались от прошлых прогонов: {', '.join(stale)} (git-xfer cleanup)",
         )
+
+
+def _toplevel_hint(git: Git, path: Path, key: str) -> str | None:
+    """Если путь ведёт внутрь репозитория — текст подсказки, иначе None."""
+    inside = git.run("rev-parse", "--show-prefix", check=False)
+    if not inside.ok or not inside.text:
+        return None
+    top = git.run("rev-parse", "--show-toplevel", check=False).text or str(path)
+    prefix = inside.text.rstrip("/")
+    return (
+        f"{path} — это подкаталог репозитория {top}. Путь стороны должен "
+        f"указывать на корень, а подкаталог задаётся отдельным ключом: "
+        f"{key} = \"{top}\", {key}_prefix = \"{prefix}\""
+    )
+
+
+def _check_prefixes(git_target: Git, git_source: Git, profile: Profile, report: Report) -> None:
+    """Подкаталоги сторон: путь не должен вести внутрь репо, а префикс —
+    существовать в своей ветке."""
+    # Ключ стороны берём из профиля, а не из позиции: при `--to a`
+    # источник — это сторона `b`, и подсказка про `a_prefix` увела бы
+    # человека править не ту половину пары.
+    sides = (
+        ("источник", git_source, profile.source, profile.source_prefix,
+         profile.source_branch, profile.source_key),
+        ("цель", git_target, profile.target, profile.target_prefix,
+         profile.target_branch, profile.target_key),
+    )
+    for name, git, path, prefix, branch, key in sides:
+        hint = _toplevel_hint(git, path, key)
+        if hint:
+            report.add(f"путь: {name}", FAIL, hint)
+            continue
+        if not prefix:
+            continue
+        try:
+            found = subtree(git, branch, prefix)
+        except NotATree as exc:
+            report.add(f"подкаталог: {name}", FAIL, str(exc))
+            continue
+        if found:
+            report.add(f"подкаталог: {name}", OK, f"{prefix}/ в {branch}")
+        elif key == profile.target_key:
+            # В цели подкаталог может появиться первым же перенесённым
+            # коммитом — это законно.
+            report.add(
+                f"подкаталог: {name}",
+                WARN,
+                f"{prefix!r} в ветке {branch!r} ещё нет; создастся первым переносом",
+            )
+        else:
+            report.add(
+                f"подкаталог: {name}",
+                FAIL,
+                f"{prefix!r} — такого каталога нет в ветке {branch!r} ({path}), переносить нечего",
+            )
 
 
 def run_preflight(git_target: Git, git_source: Git, profile: Profile) -> Report:
@@ -272,5 +336,6 @@ def run_preflight(git_target: Git, git_source: Git, profile: Profile) -> Report:
     _check_busy(git_target, report)
     _check_clean(git_target, report)
     _check_source(git_target, git_source, profile, report)
+    _check_prefixes(git_target, git_source, profile, report)
     _check_warnings(git_target, git_source, profile, report)
     return report

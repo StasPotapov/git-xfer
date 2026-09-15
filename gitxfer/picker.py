@@ -18,7 +18,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 
-from .discover import NEW, SIMILAR, STATUS_HINT, TRANSFERRED, Row
+from .discover import NEW, PARTIAL, PARTIAL_HINT, SIMILAR, STATUS_HINT, TRANSFERRED, Row
 from .errors import XferError
 
 PAGE_SIZE = 40
@@ -108,6 +108,7 @@ def parse_selection(spec: str, count: int) -> list[int]:
 @dataclass
 class Layout:
     number: int
+    mark: int
     short: int
     date: int
     author: int
@@ -116,13 +117,16 @@ class Layout:
 
 def _layout(rows: list[Row], total_width: int) -> Layout:
     number = max(2, len(str(max((row.number for row in rows), default=1))))
+    # Метка бывает двухсимвольной («+*»), и ширину колонки считаем по факту:
+    # с фиксированной единицей вёрстка поехала бы на первой же такой строке.
+    mark = max((display_width(row.mark) for row in rows), default=1)
     short = max((display_width(row.commit.short) for row in rows), default=7)
     date = max((display_width(row.commit.date) for row in rows), default=10)
     author = min(18, max((display_width(row.commit.author) for row in rows), default=6))
     # номер + пробел + метка + пробел + хеш + пробел + дата + пробел + автор + пробел
-    fixed = number + 1 + 1 + 1 + short + 1 + date + 1 + author + 1
+    fixed = number + 1 + mark + 1 + short + 1 + date + 1 + author + 1
     subject = max(20, total_width - fixed)
-    return Layout(number, short, date, author, subject)
+    return Layout(number, mark, short, date, author, subject)
 
 
 def render_rows(rows: list[Row], width: int | None = None) -> list[str]:
@@ -137,7 +141,7 @@ def render_rows(rows: list[Row], width: int | None = None) -> list[str]:
             " ".join(
                 [
                     str(row.number).rjust(layout.number),
-                    row.status,
+                    pad(row.mark, layout.mark),
                     pad(clip(commit.short, layout.short), layout.short),
                     pad(clip(commit.date, layout.date), layout.date),
                     pad(clip(commit.author, layout.author), layout.author),
@@ -153,6 +157,9 @@ def legend(rows: list[Row]) -> str:
     for row in rows:
         counts[row.status] = counts.get(row.status, 0) + 1
     parts = [f"{mark} {STATUS_HINT[mark]}: {counts.get(mark, 0)}" for mark in (NEW, SIMILAR, TRANSFERRED)]
+    partial = sum(1 for row in rows if row.partial)
+    if partial:
+        parts.append(f"{PARTIAL} {PARTIAL_HINT}: {partial}")
     return "   ".join(parts)
 
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from .config import Profile
 from .gitcmd import Git
+from .prefix import touches_outside
 from .state import State
 
 US = "\x1f"  # разделитель полей
@@ -21,12 +22,15 @@ RS = "\x1e"  # разделитель записей
 NEW = "+"
 SIMILAR = "≈"
 TRANSFERRED = "−"
+#: Коммит задел и подкаталог, и файлы вне него: приедет только часть.
+PARTIAL = "*"
 
 STATUS_HINT = {
     NEW: "новый",
     SIMILAR: "совпал patch-id",
     TRANSFERRED: "уже перенесён",
 }
+PARTIAL_HINT = "задевает файлы вне подкаталога — приедет только часть"
 
 LOG_FORMAT = US.join(["%H", "%h", "%ad", "%an", "%s"]) + RS
 
@@ -51,6 +55,12 @@ class Row:
     commit: Commit
     status: str
     reason: str = ""
+    #: Коммит выходит за подкаталог: перенесётся только часть внутри него.
+    partial: bool = False
+
+    @property
+    def mark(self) -> str:
+        return f"{self.status}{PARTIAL}" if self.partial else self.status
 
 
 @dataclass
@@ -60,7 +70,8 @@ class Survey:
     rows: list[Row] = field(default_factory=list)
     source_ref: str = ""
     scanned_target: int = 0
-    #: Коммиты, по которым в этом прогоне нужен patch-id — «горячая» часть кэша.
+    #: Ключи кэша patch-id, задействованные в этом прогоне, — «горячая» часть.
+    #: Именно ключи, а не sha: при префиксе ключ составной (см. `pid_key`).
     hot_shas: set[str] = field(default_factory=set)
 
     def by_number(self, number: int) -> Row | None:
@@ -97,17 +108,34 @@ def has_ref(git: Git, ref: str) -> bool:
 # -- чтение истории -------------------------------------------------------
 
 
-def _sanitize(text: str) -> str:
+def sanitize(text: str) -> str:
     """Управляющие символы из заголовка ломают вёрстку таблицы."""
     return _CONTROL_RE.sub("", text)
 
 
-def read_log(git: Git, ref: str, limit: int, *, allow_merges: bool = False) -> list[Commit]:
-    """Окно коммитов, newest-first. Парсим по \\x1e/\\x1f, никогда по \\n."""
+def read_log(
+    git: Git,
+    ref: str,
+    limit: int,
+    *,
+    allow_merges: bool = False,
+    prefix: str = "",
+) -> list[Commit]:
+    """Окно коммитов, newest-first. Парсим по \\x1e/\\x1f, никогда по \\n.
+
+    `prefix` сужает обход до подкаталога: иначе окно из `scan_limit`
+    коммитов монорепозитория могло бы не содержать ни одного нужного.
+    """
     args = ["log", f"--format={LOG_FORMAT}", "--encoding=UTF-8", "--date=short", "-n", str(limit)]
     if not allow_merges:
         args.append("--no-merges")
+    if prefix:
+        # Без --full-history git упрощает историю по pathspec и на нелинейных
+        # участках прячет коммиты, которые подкаталог всё-таки задели.
+        args.append("--full-history")
     args += [ref, "--"]
+    if prefix:
+        args.append(prefix)
     raw = git.out(*args)
     commits: list[Commit] = []
     for record in raw.split(RS):
@@ -123,24 +151,25 @@ def read_log(git: Git, ref: str, limit: int, *, allow_merges: bool = False) -> l
                 sha=sha,
                 short=short,
                 date=date,
-                author=_sanitize(author),
-                subject=_sanitize(subject),
+                author=sanitize(author),
+                subject=sanitize(subject),
             )
         )
     return commits
 
 
-def trailer_map(git: Git, ref: str, limit: int) -> dict[str, list[str]]:
+def trailer_map(git: Git, ref: str, limit: int, prefix: str = "") -> dict[str, list[str]]:
     """Для каждого коммита окна — хеши из его `(cherry picked from commit ...)`."""
-    raw = git.out(
-        "log",
-        f"--format=%H{US}%B{RS}",
-        "--encoding=UTF-8",
-        "-n",
-        str(limit),
-        ref,
-        "--",
-    )
+    args = ["log", f"--format=%H{US}%B{RS}", "--encoding=UTF-8", "-n", str(limit)]
+    if prefix:
+        # То же упрощение истории, что и в read_log: окна обязаны совпадать,
+        # иначе коммит попадёт в таблицу, а его трейлер прочитан не будет —
+        # и канал дедупликации молча отключится.
+        args.append("--full-history")
+    args += [ref, "--"]
+    if prefix:
+        args.append(prefix)
+    raw = git.out(*args)
     result: dict[str, list[str]] = {}
     for record in raw.split(RS):
         record = record.strip("\n")
@@ -176,20 +205,42 @@ class ShaSet:
 # -- patch-id -------------------------------------------------------------
 
 
-def patch_ids(git: Git, state: State, ref: str, window: int) -> dict[str, str]:
+def pid_key(sha: str, prefix: str = "") -> str:
+    """Ключ кэша patch-id.
+
+    Префикс — часть ключа: с `--relative` дифф считается по другим путям,
+    и один и тот же коммит при разных префиксах даёт разные patch-id.
+    Без префикса ключ прежний, так что старый кэш остаётся валидным.
+    """
+    return f"{sha}@{prefix}" if prefix else sha
+
+
+def patch_ids(
+    git: Git, state: State, ref: str, window: int, *, prefix: str = ""
+) -> dict[str, str]:
     """patch-id для окна коммитов `ref`, с кэшем в state.
 
     `git cherry` не используем: в нём `<limit>` применяется уже после
     вычисления patch-id всей целевой истории, а при несвязанных историях
     ограничить обход нечем — на большом репо это минуты.
     """
-    shas = git.lines("rev-list", "--no-merges", "-n", str(window), ref, "--")
-    missing = [sha for sha in shas if sha not in state.patchid_cache]
+    args = ["rev-list", "--no-merges", "-n", str(window)]
+    if prefix:
+        args.append("--full-history")   # окно то же, что у read_log
+    args += [ref, "--"]
+    if prefix:
+        args.append(prefix)
+    shas = git.lines(*args)
+    missing = [sha for sha in shas if pid_key(sha, prefix) not in state.patchid_cache]
     if missing:
+        # --root: иначе корневой коммит не даст ни одной строки.
+        # --no-renames: patch-id должен зависеть только от текста диффа.
+        # --relative: срезает префикс, чтобы дифф сошёлся со второй стороной.
+        diff = ["diff-tree", "--stdin", "-p", "--root", "--no-renames"]
+        if prefix:
+            diff.append(f"--relative={prefix}")
         raw = git.pipeline(
-            # --root: иначе корневой коммит не даст ни одной строки.
-            # --no-renames: patch-id должен зависеть только от текста диффа.
-            ["diff-tree", "--stdin", "-p", "--root", "--no-renames"],
+            diff,
             ["patch-id", "--stable"],
             stdin="\n".join(missing) + "\n",
         )
@@ -201,8 +252,12 @@ def patch_ids(git: Git, state: State, ref: str, window: int) -> dict[str, str]:
         for sha in missing:
             # Пустой дифф (коммит без изменений) кэшируем как "", чтобы
             # не пересчитывать его каждый запуск.
-            state.patchid_cache[sha] = computed.get(sha, "")
-    return {sha: state.patchid_cache[sha] for sha in shas if state.patchid_cache.get(sha)}
+            state.patchid_cache[pid_key(sha, prefix)] = computed.get(sha, "")
+    return {
+        sha: state.patchid_cache[pid_key(sha, prefix)]
+        for sha in shas
+        if state.patchid_cache.get(pid_key(sha, prefix))
+    }
 
 
 # -- сведение таблицы -----------------------------------------------------
@@ -229,9 +284,15 @@ def survey(
     limit = limit or profile.scan_limit
     dedup_window = dedup_window or profile.dedup_window
     patchid_window = patchid_window or profile.patchid_window
-    commits = read_log(git, profile.ref, limit, allow_merges=allow_merges)
+    src_prefix = profile.source_prefix
+    dst_prefix = profile.target_prefix
+    commits = read_log(
+        git, profile.ref, limit, allow_merges=allow_merges, prefix=src_prefix
+    )
 
-    # Хеши целевой ветки в окне — по ним и сверяемся.
+    # Хеши целевой ветки в окне — по ним и сверяемся. Подкаталог цели тут
+    # не сужаем: трейлер ищем по всей её истории, иначе коммит, приехавший
+    # до появления подкаталога, перестал бы считаться перенесённым.
     target_shas = ShaSet(
         set(git.lines("rev-list", "-n", str(dedup_window), profile.target_branch, "--"))
     )
@@ -246,7 +307,7 @@ def survey(
                 picked_short.append(sha)
     # Канал 2: коммит источника сам помечен как перенесённый из коммита,
     # который уже лежит в цели, — так выглядит обратное направление.
-    source_trailers = trailer_map(git, profile.ref, limit)
+    source_trailers = trailer_map(git, profile.ref, limit, src_prefix)
     # Канал 3: локальный маппинг. Проверяем именно достижимость из целевой
     # ветки: после reset/rebase/amend объект живёт в репозитории ещё долго,
     # и `cat-file` нашёл бы висячий коммит, которого в истории уже нет.
@@ -255,10 +316,14 @@ def survey(
     target_pids: dict[str, str] = {}
     source_pids: dict[str, str] = {}
     if use_patch_id:
-        target_pids = patch_ids(git, state, profile.target_branch, patchid_window)
+        target_pids = patch_ids(
+            git, state, profile.target_branch, patchid_window, prefix=dst_prefix
+        )
         # Со стороны источника patch-id нужны только для показанных строк.
-        source_pids = patch_ids(git, state, profile.ref, limit)
-    hot = set(target_pids) | set(source_pids)
+        source_pids = patch_ids(git, state, profile.ref, limit, prefix=src_prefix)
+    hot = {pid_key(sha, dst_prefix) for sha in target_pids} | {
+        pid_key(sha, src_prefix) for sha in source_pids
+    }
     known_pids = {pid: sha for sha, pid in target_pids.items()}
 
     rows: list[Row] = []
@@ -279,7 +344,15 @@ def survey(
             pid = source_pids.get(commit.sha)
             if pid and pid in known_pids:
                 status, reason = SIMILAR, f"patch-id как у {known_pids[pid][:12]}"
-        rows.append(Row(number=number, commit=commit, status=status, reason=reason))
+        rows.append(
+            Row(
+                number=number,
+                commit=commit,
+                status=status,
+                reason=reason,
+                partial=touches_outside(git, commit.sha, src_prefix),
+            )
+        )
 
     return Survey(
         rows=rows,

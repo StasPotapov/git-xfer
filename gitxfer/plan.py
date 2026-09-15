@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .discover import Commit
 from .gitcmd import Git, GitError
+from .prefix import Projector, empty_tree
 
 
 @dataclass
@@ -40,11 +41,6 @@ class Plan:
         return [step for step in self.steps if step.empty]
 
 
-def empty_tree(git: Git) -> str:
-    """Хеш пустого дерева для формата объектов этого репозитория."""
-    return git.out("hash-object", "-t", "tree", "/dev/null")
-
-
 def _merge_base_for(git: Git, sha: str, empty: str) -> str:
     """База трёхстороннего слияния — дерево `C^`; для корневого коммита пустое."""
     parent = git.run("rev-parse", "--verify", "--quiet", f"{sha}^", check=False).text
@@ -63,20 +59,38 @@ def _parse(output: str) -> tuple[str, list[str], str]:
     return tree, conflicts, messages
 
 
-def dry_run(git: Git, base: str, commits: list[Commit]) -> Plan:
-    """Прогнать очередь поверх `base`, ничего не меняя в репозитории."""
+def dry_run(
+    git: Git,
+    base: str,
+    commits: list[Commit],
+    projector: Projector | None = None,
+) -> Plan:
+    """Прогнать очередь поверх `base`, ничего не меняя в репозитории.
+
+    При смене префикса в merge-tree идёт не сам коммит, а его проекция —
+    иначе предсказание считалось бы по чужим путям. Проекция пишет объекты
+    в целевой репозиторий, но ни на что не ссылается: их соберёт `git gc`.
+    """
     empty = empty_tree(git)
     plan = Plan(base=base)
     current = base
     for commit in commits:
-        merge_base = _merge_base_for(git, commit.sha, empty)
+        rev = commit.sha
+        if projector and projector.enabled:
+            built = projector.commit(commit.sha)
+            if built is None:
+                # Подкаталог не затронут — шаг не изменит ничего.
+                plan.steps.append(Step(commit=commit, tree=current, empty=True))
+                continue
+            rev = built
+        merge_base = _merge_base_for(git, rev, empty)
         result = git.run(
             "merge-tree",
             "--write-tree",
             "--name-only",
             f"--merge-base={merge_base}",
             current,
-            commit.sha,
+            rev,
             check=False,
         )
         if result.returncode > 1:

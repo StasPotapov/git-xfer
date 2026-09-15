@@ -84,6 +84,20 @@ resolve_conflicts = "mechanical"
 # b = "/path/to/repo-b"
 # a_branch = "release/1.x"   # если ветки называются по-разному
 # b_branch = "stable"
+# --- Проект живёт в подкаталоге одного из репозиториев -------------------
+# Путь стороны — ВСЕГДА корень репозитория; подкаталог задаётся отдельным
+# ключом <сторона>_prefix. При переносе пути переписываются: снимается
+# префикс источника, надевается префикс цели.
+#
+# [profiles.myapp]
+# a = "/path/to/monorepo"
+# a_prefix = "apps/mobile"   # относительно корня репо, без слеша впереди
+# b = "/path/to/personal-repo"    # тут проект в корне — b_prefix не нужен
+# branch = "master"
+#
+# Коммит, не задевший подкаталог, в список не попадает вовсе. Коммит,
+# задевший и подкаталог, и файлы вне него, переносится ЧАСТИЧНО (только
+# внутренняя часть) и помечен в списке звёздочкой: + *
 """
 
 def _xdg_dir(var: str, fallback: str) -> Path:
@@ -100,6 +114,29 @@ def config_path() -> Path:
     return config_dir() / "config.toml"
 
 
+def normalize_prefix(raw: str | None, where: str = "префикс") -> str:
+    """`"./a/b/"` → `"a/b"`. Абсолютный путь и `..` — ошибка конфига."""
+    if raw is None or not str(raw).strip():
+        return ""
+    text = str(raw).strip().replace("\\", "/")
+    if text.startswith("/"):
+        raise ConfigError(
+            f"{where}: нужен путь внутри репозитория, а не абсолютный ({raw!r})"
+        )
+    parts = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ConfigError(f"{where}: '..' в пути не допускается ({raw!r})")
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _at(prefix: str) -> str:
+    return f"/{prefix}" if prefix else ""
+
+
 @dataclass(frozen=True)
 class Side:
     """Одна сторона пары."""
@@ -107,6 +144,9 @@ class Side:
     key: str          # "a" или "b"
     path: Path
     branch: str
+    #: Подкаталог, в котором на этой стороне живёт проект. Пусто — проект
+    #: лежит в корне репозитория.
+    prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,6 +161,14 @@ class Profile:
     scan_limit: int
     dedup_window: int
     patchid_window: int
+    #: Подкаталоги сторон. Перенос срезает `source_prefix` и дописывает
+    #: `target_prefix`; пустые — пути идут как есть.
+    source_prefix: str = ""
+    target_prefix: str = ""
+    #: Какой стороной пары ("a"/"b") оказались источник и цель. Нужно там,
+    #: где мы советуем человеку, какой ключ конфига править.
+    source_key: str = "a"
+    target_key: str = "b"
 
     @property
     def alias(self) -> str:
@@ -135,6 +183,9 @@ class Profile:
             return alias
         # В хеш идёт всё, что делает направление уникальным: иначе разовые
         # прогоны по разным веткам подрались бы за один и тот же ref.
+        # Префикс сюда не входит намеренно: в refs/xfer/<alias>/head лежит
+        # кончик ветки источника как есть, и от подкаталога он не зависит —
+        # двум профилям по одной паре незачем тащить один и тот же pack дважды.
         seed = "\0".join(
             [self.name, str(self.source), self.source_branch, self.target_branch]
         )
@@ -148,9 +199,18 @@ class Profile:
 
     def describe_short(self) -> str:
         return (
-            f"{self.source} ({self.source_branch}) → "
-            f"{self.target} ({self.target_branch})"
+            f"{self.source}{_at(self.source_prefix)} ({self.source_branch}) → "
+            f"{self.target}{_at(self.target_prefix)} ({self.target_branch})"
         )
+
+    @property
+    def has_prefix(self) -> bool:
+        return bool(self.source_prefix or self.target_prefix)
+
+    @property
+    def pick_ref(self) -> str:
+        """Ссылка, держащая синтетический коммит, пока идёт cherry-pick."""
+        return f"refs/xfer/{self.alias}/pick"
 
     @property
     def source_refspec(self) -> str:
@@ -189,6 +249,10 @@ class Pair:
             scan_limit=self.scan_limit,
             dedup_window=self.dedup_window,
             patchid_window=self.patchid_window,
+            source_prefix=source.prefix,
+            target_prefix=target.prefix,
+            source_key=source.key,
+            target_key=target.key,
         )
 
 
@@ -240,6 +304,10 @@ def adhoc_profile(
     scan_limit: int = DEFAULT_SCAN_LIMIT,
     dedup_window: int = DEFAULT_DEDUP_WINDOW,
     patchid_window: int = DEFAULT_PATCHID_WINDOW,
+    source_prefix: str = "",
+    target_prefix: str = "",
+    source_key: str = "a",
+    target_key: str = "b",
 ) -> Profile:
     """Направление, собранное из флагов или ответов, а не из конфига."""
     return Profile(
@@ -251,6 +319,10 @@ def adhoc_profile(
         scan_limit=scan_limit,
         dedup_window=dedup_window,
         patchid_window=patchid_window,
+        source_prefix=normalize_prefix(source_prefix, "--source-prefix"),
+        target_prefix=normalize_prefix(target_prefix, "--target-prefix"),
+        source_key=source_key,
+        target_key=target_key,
     )
 
 
@@ -297,9 +369,11 @@ def _parse_pair(
     if old_style:
         # Старый формат — та же пара, просто стороны назывались source и target.
         a = Side("a", Path(_require_str(table, "source", where)).expanduser(),
-                 _require_str(table, "source_branch", where))
+                 _require_str(table, "source_branch", where),
+                 normalize_prefix(table.get("source_prefix"), f"{where}: 'source_prefix'"))
         b = Side("b", Path(_require_str(table, "target", where)).expanduser(),
-                 _require_str(table, "target_branch", where))
+                 _require_str(table, "target_branch", where),
+                 normalize_prefix(table.get("target_prefix"), f"{where}: 'target_prefix'"))
     elif new_style:
         shared = table.get("branch")
         if shared is not None and (not isinstance(shared, str) or not shared.strip()):
@@ -314,7 +388,17 @@ def _parse_pair(
                     " Укажите 'branch' для обеих сторон или"
                     f" '{key}_branch' отдельно"
                 )
-            sides.append(Side(key, path, branch.strip()))
+            raw_prefix = table.get(f"{key}_prefix")
+            if raw_prefix is not None and not isinstance(raw_prefix, str):
+                raise ConfigError(f"{where}: '{key}_prefix' должен быть строкой")
+            sides.append(
+                Side(
+                    key,
+                    path,
+                    branch.strip(),
+                    normalize_prefix(raw_prefix, f"{where}: '{key}_prefix'"),
+                )
+            )
         a, b = sides
     else:
         raise ConfigError(

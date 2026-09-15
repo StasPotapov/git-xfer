@@ -7,6 +7,11 @@
 
 Точка расширения: `Backend` — сейчас единственный бэкенд `cherry-pick`,
 сюда же ляжет `format-patch` + `am -3`.
+
+Смена префикса путей сделана не бэкендом, а подстановкой: `Projector`
+синтезирует коммит с переписанными путями, и `cherry-pick` получает его
+вместо оригинала. В очереди, в state и в отчётах при этом всюду остаются
+оригинальные sha — синтетический живёт ровно от `pick()` до коммита.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from .config import Profile
 from .errors import EXIT_CONFLICT, EXIT_OK, StateError, XferError
 from .gitcmd import Git, GitResult
 from .preflight import git_path, head_sha
+from .prefix import Projector
 from .state import Progress, State
 
 #: Статусы шага.
@@ -39,6 +45,13 @@ class Options:
     hooks: bool = False                   # падающий линтер не должен рвать серию
     gpg_sign: bool = False
     keep_committer_date: bool = False     # ломает предположение git о неубывающих таймстампах
+    #: Подкаталоги сторон. Живут здесь, а не берутся из профиля на каждом
+    #: шаге, ровно по той же причине, что и остальные опции: серия должна
+    #: доиграться теми правилами, с которыми начиналась, даже если конфиг
+    #: тем временем поправили. `from_json` игнорирует незнакомые ключи,
+    #: так что старый state читается без миграции.
+    source_prefix: str = ""
+    target_prefix: str = ""
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -82,15 +95,33 @@ def _noop(_: str) -> None:
 # -- один шаг -------------------------------------------------------------
 
 
-def _pick_args(git: Git, sha: str, options: Options, is_merge: bool) -> tuple[list[str], list[str], dict[str, str]]:
+def _pick_args(
+    git: Git,
+    rev: str,
+    options: Options,
+    is_merge: bool,
+    *,
+    origin: str = "",
+    projected: bool = False,
+) -> tuple[list[str], list[str], dict[str, str]]:
+    """Аргументы cherry-pick. `rev` — что применяем, `origin` — откуда родом.
+
+    Для обычного переноса это одно и то же; у проекции `rev` синтетический,
+    и всё, что читается из коммита-источника, берётся по `origin`.
+    """
+    origin = origin or rev
     args = ["cherry-pick"]
-    if options.trailer:
+    if options.trailer and not projected:
+        # У проекции трейлер уже в сообщении, и он указывает на оригинал;
+        # -x вписал бы сюда sha синтетического коммита.
         args.append("-x")
     args.append(f"--empty={options.empty}")
     args.append("--gpg-sign" if options.gpg_sign else "--no-gpg-sign")
-    if is_merge:
+    if is_merge and not projected:
+        # У проекции родитель всегда один: дифф уже посчитан относительно
+        # первого родителя, и -m 1 git отверг бы как «это не merge».
         args += ["-m", "1"]
-    args += ["--", sha]
+    args += ["--", rev]
 
     config: list[str] = []
     if not options.hooks:
@@ -99,7 +130,7 @@ def _pick_args(git: Git, sha: str, options: Options, is_merge: bool) -> tuple[li
 
     env: dict[str, str] = {}
     if options.keep_committer_date:
-        env["GIT_COMMITTER_DATE"] = git.out("show", "-s", "--format=%cI", sha)
+        env["GIT_COMMITTER_DATE"] = git.out("show", "-s", "--format=%cI", origin)
     return args, config, env
 
 
@@ -108,13 +139,29 @@ def is_merge_commit(git: Git, sha: str) -> bool:
     return len(parents) > 2
 
 
-def pick(git: Git, sha: str, options: Options) -> tuple[str, GitResult, str]:
+def pick(
+    git: Git,
+    sha: str,
+    options: Options,
+    projector: Projector | None = None,
+) -> tuple[str, GitResult, str]:
     """Применить один коммит. Возвращает (статус, результат git, новый HEAD)."""
     before = head_sha(git)
     merge = is_merge_commit(git, sha)
     if merge and not options.allow_merges:
         return SKIPPED, GitResult((), 0, "", ""), before or ""
-    args, config, env = _pick_args(git, sha, options, merge)
+    projected = bool(projector and projector.enabled)
+    rev = sha
+    if projected:
+        built = projector.commit(sha, trailer=options.trailer)
+        if built is None:
+            # Коммит не задел подкаталог — переносить нечего.
+            return EMPTY, GitResult((), 0, "", ""), before or ""
+        rev = built
+        projector.pin(rev)
+    args, config, env = _pick_args(
+        git, rev, options, merge, origin=sha, projected=projected
+    )
     result = git.run(*args, check=False, config=config, env=env, mutating=True)
     after = head_sha(git) or ""
     if result.ok:
@@ -127,6 +174,22 @@ def pick(git: Git, sha: str, options: Options) -> tuple[str, GitResult, str]:
 # -- очередь --------------------------------------------------------------
 
 
+def projector_for(git: Git, profile: Profile, options: Options | None = None) -> Projector:
+    """Переписывание префикса; без префиксов — пустышка.
+
+    У начатой серии префиксы берутся из её опций, а не из профиля:
+    `continue` после паузы обязан доиграть очередь теми же путями, какими
+    начинал, даже если конфиг тем временем поправили. Без опций (сухой
+    прогон, у которого серии ещё нет) — из профиля.
+    """
+    return Projector(
+        git,
+        source_prefix=options.source_prefix if options else profile.source_prefix,
+        target_prefix=options.target_prefix if options else profile.target_prefix,
+        pin_ref=profile.pick_ref,
+    )
+
+
 def _drain(
     git: Git,
     state: State,
@@ -134,6 +197,7 @@ def _drain(
     options: Options,
     outcome: Outcome,
     report: Reporter,
+    projector: Projector,
 ) -> Outcome:
     """Прокрутить очередь до конца или до первого конфликта."""
     total = progress.total
@@ -144,7 +208,7 @@ def _drain(
         subject = git.out("show", "-s", "--format=%s", sha)
         report(f"[{index}/{total}] {sha[:12]} {subject}")
         logbook.info("шаг %d/%d: беру %s %s", index, total, sha, subject)
-        status, result, head = pick(git, sha, options)
+        status, result, head = pick(git, sha, options, projector)
         logbook.info("шаг %d/%d: %s → %s", index, total, status, head or "HEAD не сдвинулся")
         if status == CONFLICT:
             progress.expected_head = head
@@ -167,7 +231,15 @@ def _drain(
             raise XferError(f"cherry-pick {sha[:12]} не удался:\n{result.describe()}")
         _record(state, progress, outcome, sha, status, head)
         if status == EMPTY:
-            report("  пусто после переноса — пропущен")
+            untouched = projector.enabled and (
+                # Ответ уже посчитан в pick() и лежит в кэше.
+                projector.commit(sha, trailer=options.trailer) is None
+            )
+            report(
+                "  подкаталог не затронут — пропущен"
+                if untouched
+                else "  пусто после переноса — пропущен"
+            )
         elif status == SKIPPED:
             report("  merge-коммит — пропущен (нужен --allow-merges)")
         progress.expected_head = head or progress.expected_head
@@ -175,6 +247,7 @@ def _drain(
     progress.current = None
     state.in_progress = None
     state.save()
+    projector.unpin()
     return outcome
 
 
@@ -214,6 +287,10 @@ def start(
     head = head_sha(git)
     if not head:
         raise XferError("в целевой ветке нет коммитов")
+    # Префиксы направления фиксируем в опциях серии здесь, а не в cli:
+    # так их не забудет ни один вызывающий.
+    options.source_prefix = profile.source_prefix
+    options.target_prefix = profile.target_prefix
     progress = Progress(
         profile=profile.name,
         head_before=head,
@@ -228,7 +305,15 @@ def start(
         "серия: %d коммит(ов), профиль %s, HEAD до начала %s",
         len(shas), profile.name, head,
     )
-    return _drain(git, state, progress, options, Outcome(), report)
+    return _drain(
+        git,
+        state,
+        progress,
+        options,
+        Outcome(),
+        report,
+        projector_for(git, profile, options),
+    )
 
 
 def _load_progress(state: State, profile: Profile, report: Reporter = _noop) -> Progress:
@@ -300,6 +385,21 @@ def resume(
     """Докрутить очередь после конфликта: `continue` или `skip`."""
     progress = _load_progress(state, profile, report)
     options = Options.from_json(progress.opts)
+    if (options.source_prefix, options.target_prefix) != (
+        profile.source_prefix,
+        profile.target_prefix,
+    ):
+        report(
+            "  подкаталоги в конфиге изменились с начала серии; доигрываем "
+            f"теми, с которыми начинали: {options.source_prefix or 'корень'} → "
+            f"{options.target_prefix or 'корень'}"
+        )
+        logbook.warn(
+            "префиксы серии (%r → %r) разошлись с профилем (%r → %r)",
+            options.source_prefix, options.target_prefix,
+            profile.source_prefix, profile.target_prefix,
+        )
+    projector = projector_for(git, profile, options)
     outcome = Outcome()
     current = progress.current
     in_pick = git_path(git, "CHERRY_PICK_HEAD").exists()
@@ -346,7 +446,7 @@ def resume(
     else:
         _check_head(git, progress)
 
-    return _drain(git, state, progress, options, outcome, report)
+    return _drain(git, state, progress, options, outcome, report, projector)
 
 
 def abort(git: Git, profile: Profile, state: State, report: Reporter = _noop) -> Outcome:
@@ -356,6 +456,7 @@ def abort(git: Git, profile: Profile, state: State, report: Reporter = _noop) ->
         result = git.run("cherry-pick", "--abort", check=False, mutating=True)
         if not result.ok:
             raise XferError("git cherry-pick --abort не прошёл:\n" + result.describe())
+    projector_for(git, profile, Options.from_json(progress.opts)).unpin()
     done = len(progress.done)
     report(
         f"Серия прервана. Перенесённых коммитов оставлено: {done}; "

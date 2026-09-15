@@ -27,10 +27,13 @@ from .config import (
     config_path,
     load_config,
     log_settings,
+    normalize_prefix,
     write_template,
 )
 from .discover import (
     NEW,
+    US,
+    sanitize,
     SIMILAR,
     TRANSFERRED,
     Commit,
@@ -52,10 +55,11 @@ from .errors import (
 )
 from .gitcmd import Git
 from .plan import dry_run
+from .prefix import touches_outside
 from .preflight import head_sha, run_preflight, stale_xfer_refs
 from .picker import choose, legend, parse_selection, render_rows, require_tty
 from .state import State, state_path
-from .transfer import Options, abort, resume, start
+from .transfer import Options, abort, projector_for, resume, start
 
 
 def eprint(text: str = "") -> None:
@@ -205,6 +209,18 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
     # А вот когда про вторую сторону не знает никто — она называется так же.
     src_branch = src_branch or dst_branch
     dst_branch = dst_branch or src_branch
+    # Префикс «как у второй стороны» не подставляем никогда: подкаталог —
+    # свойство конкретного репозитория, и угадывать его нечем.
+    src_prefix = normalize_prefix(
+        args.source_prefix if args.source_prefix is not None else
+        (base.source_prefix if base else ""),
+        "--source-prefix",
+    )
+    dst_prefix = normalize_prefix(
+        args.target_prefix if args.target_prefix is not None else
+        (base.target_prefix if base else ""),
+        "--target-prefix",
+    )
 
     if args.ask or not (source and target and src_branch and dst_branch):
         if not sys.stdin.isatty():
@@ -222,6 +238,8 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         or Path(target) != base.target
         or src_branch != base.source_branch
         or dst_branch != base.target_branch
+        or src_prefix != base.source_prefix
+        or dst_prefix != base.target_prefix
     )
     profile = adhoc_profile(
         name=base_name if not changed else f"{base_name}@{src_branch}",
@@ -232,14 +250,25 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         scan_limit=base.scan_limit if base else DEFAULT_SCAN_LIMIT,
         dedup_window=base.dedup_window if base else DEFAULT_DEDUP_WINDOW,
         patchid_window=base.patchid_window if base else DEFAULT_PATCHID_WINDOW,
+        source_prefix=src_prefix,
+        target_prefix=dst_prefix,
+        source_key=base.source_key if base else "a",
+        target_key=base.target_key if base else "b",
     )
     return profile, config
 
 
+def _side_line(path: Path, branch: str, prefix: str) -> str:
+    where = f"{path} ({branch})"
+    return f"{where}, подкаталог {prefix}/" if prefix else where
+
+
 def describe(profile: Profile) -> str:
     return (
-        f"Направление: {profile.source} ({profile.source_branch})\n"
-        f"          →  {profile.target} ({profile.target_branch})"
+        "Направление: "
+        + _side_line(profile.source, profile.source_branch, profile.source_prefix)
+        + "\n          →  "
+        + _side_line(profile.target, profile.target_branch, profile.target_prefix)
     )
 
 
@@ -317,8 +346,39 @@ def rows_by_sha(context: Context, view: Survey, shas: list[str]) -> list[Row]:
             raise XferError(f"{raw!r} не принадлежит ветке источника {context.profile.ref}")
         row = known.get(full)
         if row is None:
-            commit = Commit(sha=full, short=full[:12], date="", author="", subject="")
-            row = Row(number=0, commit=commit, status=NEW, reason="вне окна --limit")
+            # Строки нет в таблице: коммит либо вне окна --limit, либо —
+            # при переносе с префиксом — вне подкаталога. Поля дочитываем,
+            # иначе в «порядке применения» окажется хеш без заголовка.
+            # split(US, 2): заголовок идёт последним и сам может содержать
+            # разделитель — распаковка «ровно в три» дала бы трейсбек.
+            date, author, subject = context.target.out(
+                "show", "-s", "--date=short", f"--format=%ad{US}%an{US}%s", full
+            ).split(US, 2)
+            partial = touches_outside(
+                context.target, full, context.profile.source_prefix
+            )
+            outside = bool(context.profile.source_prefix) and not context.target.lines(
+                "log", "--no-walk", "--format=%H", full, "--",
+                context.profile.source_prefix,
+            )
+            commit = Commit(
+                sha=full,
+                short=full[:12],
+                date=date,
+                author=sanitize(author),
+                subject=sanitize(subject),
+            )
+            row = Row(
+                number=0,
+                commit=commit,
+                status=NEW,
+                reason=(
+                    f"вне подкаталога {context.profile.source_prefix}/"
+                    if outside
+                    else "вне окна --limit"
+                ),
+                partial=partial and not outside,
+            )
         result.append(row)
     return result
 
@@ -426,7 +486,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     head = head_sha(context.target)
     if not head:
         raise XferError("в целевой ветке нет коммитов")
-    result = dry_run(context.target, head, ordered)
+    result = dry_run(
+        context.target, head, ordered, projector_for(context.target, context.profile)
+    )
     print()
     print("Сухой прогон (рабочее дерево не тронуто):")
     for position, step in enumerate(result.steps, start=1):
@@ -567,8 +629,12 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             "или добавьте --state, чтобы забыть его"
         )
     refs = stale_xfer_refs(context.target) if args.all else []
-    if not args.all and has_ref(context.target, profile.ref):
-        refs = [profile.ref]
+    if not args.all:
+        refs = [
+            ref
+            for ref in (profile.ref, profile.pick_ref)
+            if has_ref(context.target, ref)
+        ]
     for ref in refs:
         context.target.run("update-ref", "-d", ref, mutating=True)
         if not args.dry_run:
@@ -612,6 +678,16 @@ def _add_repo_flags(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--target", type=Path, metavar="PATH", help="целевой репозиторий, мимо конфига"
+    )
+    group.add_argument(
+        "--source-prefix",
+        metavar="DIR",
+        help="подкаталог источника, в котором лежит проект",
+    )
+    group.add_argument(
+        "--target-prefix",
+        metavar="DIR",
+        help="подкаталог цели, в который класть проект",
     )
     group.add_argument(
         "--ask", action="store_true", help="спросить репозитории и ветки интерактивно"

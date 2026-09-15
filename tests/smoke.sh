@@ -492,6 +492,229 @@ else
   ok "в скилле нет анонимного https-клона приватного репозитория"
 fi
 
+# --- перенос со сменой префикса путей -----------------------------------
+# Стенд: m — монорепозиторий с проектом в apps/mobile, n — тот же
+# проект в корне отдельного репозитория (см. tests/fixture.sh).
+
+pfx_config() { # a_prefix
+  cat > "$WORK/config/git-xfer/config.toml" <<EOF
+[defaults]
+scan_limit = 30
+
+[profiles.myapp]
+a = "$WORK/m"
+a_prefix = "$1"
+b = "$WORK/n"
+branch = "master"
+EOF
+}
+bad_config() { # файл, ключ a, ключ a_prefix
+  cat > "$1" <<EOF
+[profiles.bad]
+a = "$2"
+a_prefix = "$3"
+b = "$WORK/n"
+branch = "master"
+EOF
+}
+
+echo "== 30. префикс: конфиг и doctor =="
+MAIN_CONFIG=$(cat "$WORK/config/git-xfer/config.toml")
+pfx_config "apps/mobile"
+OUT=$(xfer doctor -p myapp --to b 2>&1); CODE=$?
+check 0 $CODE "doctor зелёный на профиле с a_prefix"
+has "apps/mobile" "$OUT" "подкаталог виден в направлении"
+has "подкаталог: источник" "$OUT" "есть проверка подкаталога"
+
+pfx_config "apps/mobile/"
+OUT=$(xfer doctor -p myapp --to b 2>&1); check 0 $? "хвостовой слеш нормализуется"
+pfx_config "apps//mobile"
+OUT=$(xfer doctor -p myapp --to b 2>&1); check 0 $? "двойной слеш нормализуется"
+
+bad_config "$WORK/p-abs.toml" "$WORK/m" "/абсолютный"
+OUT=$(xfer doctor --config "$WORK/p-abs.toml" -p bad --to b 2>&1); CODE=$?
+check 1 $CODE "абсолютный префикс — ошибка конфига"
+has "не абсолютный" "$OUT" "и сказано почему"
+
+bad_config "$WORK/p-up.toml" "$WORK/m" "../наружу"
+OUT=$(xfer doctor --config "$WORK/p-up.toml" -p bad --to b 2>&1); CODE=$?
+check 1 $CODE "'..' в префиксе — ошибка конфига"
+
+bad_config "$WORK/p-none.toml" "$WORK/m" "нет-такого"
+OUT=$(xfer doctor --config "$WORK/p-none.toml" -p bad --to b 2>&1); CODE=$?
+check 2 $CODE "несуществующий подкаталог — предполётная ошибка"
+has "переносить нечего" "$OUT" "и сказано, что переносить нечего"
+
+bad_config "$WORK/p-file.toml" "$WORK/m" "README.md"
+OUT=$(xfer doctor --config "$WORK/p-file.toml" -p bad --to b 2>&1); CODE=$?
+check 2 $CODE "префикс указывает на файл — предполётная ошибка"
+has "а не каталог" "$OUT" "и сказано, что это не каталог"
+
+printf '[profiles.bad]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
+  "$WORK/m/apps/mobile" "$WORK/n" > "$WORK/p-inside.toml"
+OUT=$(xfer doctor --config "$WORK/p-inside.toml" -p bad --to b 2>&1); CODE=$?
+check 2 $CODE "путь внутрь репозитория — предполётная ошибка"
+has "a_prefix" "$OUT" "и подсказано, как переписать профиль"
+
+# Та же ошибка, но подкаталог записан стороной b, а переносим --to a:
+# источник тут — сторона b, и подсказка обязана назвать её, а не a.
+printf '[profiles.bad]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
+  "$WORK/n" "$WORK/m/apps/mobile" > "$WORK/p-side.toml"
+OUT=$(xfer doctor --config "$WORK/p-side.toml" -p bad --to a 2>&1)
+has "b_prefix" "$OUT" "подсказка называет реальную сторону пары"
+hasnt "a_prefix" "$OUT" "и не советует править чужую сторону"
+
+echo "== 31. префикс: list, окно и patch-id =="
+pfx_config "apps/mobile"
+OUT=$(xfer list -p myapp --to b 2>&1)
+hasnt "chore: сборка" "$OUT" "коммит целиком вне подкаталога не показан"
+hasnt "init: монорепо" "$OUT" "и коммит до появления подкаталога тоже"
+has "feat: звезда" "$OUT" "коммит внутри подкаталога показан"
+has "+\*" "$OUT" "пограничный коммит помечен звёздочкой"
+has "вне подкаталога" "$OUT" "в легенде расшифровано, что значит звёздочка"
+# Одинаковое содержимое по обе стороны: в m оно под префиксом, в n — в корне.
+# Совпавший patch-id доказывает, что --relative срезает префикс правильно.
+if printf '%s\n' "$OUT" | grep -q "≈.*init: подпроект"; then
+  ok "patch-id сошёлся через границу префикса"
+else
+  bad "patch-id сошёлся через границу префикса"
+fi
+# Коммит влитой ветки TREESAME по первому родителю: без --full-history
+# упрощение истории спрятало бы его из обхода по pathspec.
+has "side: и в подпроекте" "$OUT" "коммит влитой ветки не потерян упрощением истории"
+# У merge-коммита diff-tree без -m молчит, и пометка «частичный» не появилась бы.
+OUT=$(xfer list -p myapp --to b --allow-merges 2>&1)
+printf '%s\n' "$OUT" | grep -q "+\*.*merge: влили side" \
+  && ok "merge-коммит на границе тоже помечен" \
+  || bad "merge-коммит на границе тоже помечен"
+
+echo "== 32. префикс: перенос вперёд снимает префикс =="
+SRC_STAR=$(git -C "$WORK/m" log --format='%H %s' | grep 'feat: звезда' | cut -d' ' -f1)
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_STAR" --yes 2>&1); CODE=$?
+check 0 $CODE "перенос прошёл"
+check 0 "$(git -C "$WORK/n" ls-files | grep -c '^android/' || true)" "лишней вложенности android/ не появилось"
+check 1 "$(git -C "$WORK/n" ls-files | grep -c '^icons/star.svg$' || true)" "файл лёг в корень целевого репозитория"
+BODY=$(git -C "$WORK/n" log -1 --format=%B)
+has "cherry picked from commit $SRC_STAR" "$BODY" "трейлер указывает на оригинальный коммит источника"
+check 1 "$(git -C "$WORK/n" log -1 --format=%P | wc -w | tr -d ' ')" "у перенесённого коммита один родитель"
+has "Ann Source" "$(git -C "$WORK/n" log -1 --format='%an')" "автор оригинала сохранён"
+
+echo "== 33. префикс: пограничный коммит приезжает частично =="
+SRC_BOTH=$(git -C "$WORK/m" log --format='%H %s' | grep 'fix: звезда и сборка' | cut -d' ' -f1)
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_BOTH" --yes 2>&1); CODE=$?
+check 0 $CODE "пограничный коммит перенесён"
+check 0 "$(git -C "$WORK/n" ls-files | grep -c '^tools/' || true)" "часть вне подкаталога не приехала"
+check 1 "$(git -C "$WORK/n" show --name-only --format= HEAD | grep -c '^icons/star.svg$')" "приехала ровно внутренняя часть"
+
+echo "== 34. префикс: коммит вне подкаталога ничего не двигает =="
+SRC_OUT=$(git -C "$WORK/m" log --format='%H %s' | grep 'chore: сборка' | cut -d' ' -f1)
+HEAD_BEFORE=$(git -C "$WORK/n" rev-parse HEAD)
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_OUT" --yes 2>&1); CODE=$?
+check 0 $CODE "прогон завершился без ошибки"
+has "подкаталог не затронут" "$OUT" "и сказано почему"
+check "$HEAD_BEFORE" "$(git -C "$WORK/n" rev-parse HEAD)" "HEAD цели не сдвинулся"
+
+echo "== 35. префикс: сухой прогон предсказывает то же, что делает apply =="
+SRC_APP=$(git -C "$WORK/m" log --format='%H %s' | grep 'fix: правка app.kt' | cut -d' ' -f1)
+OUT=$(xfer plan -p myapp --to b --sha "$SRC_APP" "$SRC_OUT" 2>&1); CODE=$?
+check 0 $CODE "plan на профиле с префиксом отработал"
+has "✗" "$OUT" "конфликт предсказан"
+has "станет пустым" "$OUT" "коммит вне подкаталога предсказан пустым"
+hasnt "apps/mobile/" "$OUT" "в предсказании нет путей с префиксом источника"
+has "app.kt" "$OUT" "а есть путь в координатах цели"
+
+echo "== 36. префикс: конфликт, gc на паузе, continue =="
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_APP" --yes 2>&1); CODE=$?
+check 3 $CODE "встали на конфликте (там же, где предсказал plan)"
+if git -C "$WORK/n" rev-parse --verify --quiet refs/xfer/myapp-to-b/pick >/dev/null; then
+  ok "синтетический коммит удержан ссылкой"
+else
+  bad "синтетический коммит удержан ссылкой"
+fi
+OUT=$(xfer doctor -p myapp --to b 2>&1)
+hasnt "myapp-to-b/pick" "$OUT" "doctor не считает свою же ссылку забытой"
+# Ради этой ссылки всё и затевалось: без неё gc снёс бы объекты паузы.
+git -C "$WORK/n" gc --prune=now --quiet 2>/dev/null
+printf 'fun main() {\n    println("RESOLVED")\n}\n' > "$WORK/n/app.kt"
+git -C "$WORK/n" add app.kt
+OUT=$(xfer continue -p myapp --to b 2>&1); CODE=$?
+check 0 $CODE "continue пережил gc и довёл коммит"
+if git -C "$WORK/n" rev-parse --verify --quiet refs/xfer/myapp-to-b/pick >/dev/null; then
+  bad "ссылка снята после завершения серии"
+else
+  ok "ссылка снята после завершения серии"
+fi
+
+echo "== 37. префикс: обратное направление надевает префикс =="
+MONO_BEFORE=$(git -C "$WORK/m" ls-files | grep -c '^ios/\|^tools/\|^README.md$')
+SRC_EXTRA=$(git -C "$WORK/n" log --format='%H %s' | grep 'feat: доп. иконка' | cut -d' ' -f1)
+OUT=$(xfer apply -p myapp --to a --sha "$SRC_EXTRA" --yes 2>&1); CODE=$?
+check 0 $CODE "обратный перенос прошёл"
+check 1 "$(git -C "$WORK/m" ls-files | grep -c '^apps/mobile/icons/extra.svg$' || true)" "файл лёг под префикс"
+check 0 "$(git -C "$WORK/m" ls-files | grep -c '^icons/' || true)" "в корень монорепозитория ничего не легло"
+check "$MONO_BEFORE" "$(git -C "$WORK/m" ls-files | grep -c '^ios/\|^tools/\|^README.md$')" "файлы вне префикса не удалены"
+check 1 "$(git -C "$WORK/m" diff --name-only HEAD~1 HEAD | wc -l | tr -d ' ')" "дифф ровно из одного пути"
+
+echo "== 38. префикс: дедупликация пережила проекцию =="
+OUT=$(xfer list -p myapp --to b 2>&1)
+printf '%s\n' "$OUT" | grep -q "−.*feat: звезда" \
+  && ok "перенесённое помечено как уже перенесённое" \
+  || bad "перенесённое помечено как уже перенесённое"
+OUT=$(xfer list -p myapp --to a 2>&1)
+printf '%s\n' "$OUT" | grep -q "−.*доп. иконка" \
+  && ok "обратное направление тоже видит уже перенесённое" \
+  || bad "обратное направление тоже видит уже перенесённое"
+OUT=$(xfer list -p myapp --to b --no-patch-id 2>&1); check 0 $? "--no-patch-id ничего не ломает"
+
+echo "== 39. префикс: cleanup убирает и служебные ссылки =="
+OUT=$(xfer cleanup -p myapp --to b 2>&1); CODE=$?
+check 0 $CODE "cleanup отработал"
+check 0 "$(git -C "$WORK/n" for-each-ref refs/xfer/ | wc -l | tr -d ' ')" "ссылок refs/xfer не осталось"
+
+echo "== 40. префикс: переименование наружу и abort =="
+SRC_MOVE=$(git -C "$WORK/m" log --format='%H %s' | grep 'move: звезда уехала в ios' | cut -d' ' -f1)
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_MOVE" --yes 2>&1); CODE=$?
+check 0 $CODE "коммит с переименованием наружу перенесён"
+# Вторая половина переименования лежит вне префикса, и её просто нет:
+# в координатах цели это чистое удаление.
+check 1 "$(git -C "$WORK/n" show --name-status --format= HEAD | grep -c '^D.icons/star.svg$')" "в цели это чистое удаление"
+check 0 "$(git -C "$WORK/n" ls-files | grep -c '^ios/' || true)" "каталог из другой половины монорепо не приехал"
+
+# abort на префиксном профиле: серия отменена, служебная ссылка снята.
+SRC_APP2=$(git -C "$WORK/m" log --format='%H %s' | grep 'fix: правка app.kt' | cut -d' ' -f1)
+printf 'fun main() {\n    println("ROLLED")\n}\n' > "$WORK/n/app.kt"
+git -C "$WORK/n" add app.kt
+git -C "$WORK/n" commit -qm "target: снова разошлись"
+OUT=$(xfer apply -p myapp --to b --sha "$SRC_APP2" --yes 2>&1); CODE=$?
+check 3 $CODE "снова встали на конфликте"
+OUT=$(xfer abort -p myapp --to b 2>&1); CODE=$?
+check 0 $CODE "abort отработал"
+if git -C "$WORK/n" rev-parse --verify --quiet refs/xfer/myapp-to-b/pick >/dev/null; then
+  bad "abort снял служебную ссылку"
+else
+  ok "abort снял служебную ссылку"
+fi
+check "" "$(git -C "$WORK/n" status --porcelain)" "рабочее дерево после abort чистое"
+
+echo "== 41. про префикс написано там, где человек и агент это ищут =="
+doc() { grep -qF -- "$1" "$2" && ok "$3" || bad "$3"; }
+doc "a_prefix" "$ROOT/config.example.toml" "пример конфига описывает a_prefix"
+doc "a_prefix" "$ROOT/README.md" "README описывает a_prefix"
+doc "a_prefix" "$ROOT/skills/git-xfer/SKILL.md" "скилл описывает a_prefix"
+python3 - "$ROOT" <<'PY' && ok "шаблон init тоже описывает a_prefix" || bad "шаблон init тоже описывает a_prefix"
+import sys
+sys.path.insert(0, sys.argv[1])
+from gitxfer.config import CONFIG_TEMPLATE
+sys.exit(0 if "a_prefix" in CONFIG_TEMPLATE else 1)
+PY
+if sed -n '/Что не входит в эту версию/,$p' "$ROOT/README.md" | grep -q "префикс"; then
+  bad "пункт про префикс убран из «что не входит»"
+else
+  ok "пункт про префикс убран из «что не входит»"
+fi
+
+printf '%s\n' "$MAIN_CONFIG" > "$WORK/config/git-xfer/config.toml"
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]
