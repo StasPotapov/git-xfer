@@ -703,6 +703,9 @@ doc() { grep -qF -- "$1" "$2" && ok "$3" || bad "$3"; }
 doc "a_prefix" "$ROOT/config.example.toml" "пример конфига описывает a_prefix"
 doc "a_prefix" "$ROOT/README.md" "README описывает a_prefix"
 doc "a_prefix" "$ROOT/skills/git-xfer/SKILL.md" "скилл описывает a_prefix"
+# README обещает, что агент предложит подключить скилл, — значит в скилле
+# это должно быть написано, иначе обещание останется словами.
+doc "~/.claude/skills" "$ROOT/skills/git-xfer/SKILL.md" "скилл умеет подключить себя"
 python3 - "$ROOT" <<'PY' && ok "шаблон init тоже описывает a_prefix" || bad "шаблон init тоже описывает a_prefix"
 import sys
 sys.path.insert(0, sys.argv[1])
