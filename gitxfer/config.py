@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ConfigError
+from .gitcmd import DEFAULT_TIMEOUT
 
 APP = "git-xfer"
 
@@ -25,6 +26,31 @@ DEFAULT_DEDUP_WINDOW = 5000
 #: Окно patch-id. Канал дорогой (считается дифф каждого коммита), зато
 #: результат кэшируется в state, так что платим один раз.
 DEFAULT_PATCHID_WINDOW = 1000
+
+#: Сохранять ли авторство исходного коммита. По умолчанию нет: перенос
+#: обычно тащит свои же изменения между своими же репозиториями, и чужая
+#: личность в истории целевой стороны там только мешает. Кому нужно
+#: наоборот — `keep_author = true` в конфиге или `--keep-author` разово.
+DEFAULT_KEEP_AUTHOR = False
+
+#: Дописывать ли в сообщение `(cherry picked from commit <sha>)`. По
+#: умолчанию нет: сообщение коммита переносится один в один. Цена — самый
+#: надёжный канал дедупликации выключен, и «уже переносили» утилита знает
+#: только из своего state (эта машина) и по patch-id (эвристика ≈).
+#: Кому дедупликация важнее чистого сообщения — `trailer = true`.
+DEFAULT_TRAILER = False
+
+#: Схлопывать ли выбранные коммиты в один. По умолчанию нет: перенос
+#: сохраняет историю как есть. Кому нужен один коммит на всё — `squash = true`
+#: в конфиге или `--squash` разово.
+DEFAULT_SQUASH = False
+
+#: Потолок на один вызов git, секунды. Нужен не для скорости, а против
+#: зависаний: git, севший ждать ввода (редактор, пейджер, запрос пароля),
+#: без него держит утилиту вечно, и агент, у которого нет терминала,
+#: просто перестаёт отвечать. 0 — без ограничения. Значение живёт там же,
+#: где применяется, — в обёртке над git; здесь только имя для конфига.
+DEFAULT_GIT_TIMEOUT = DEFAULT_TIMEOUT
 
 #: Насколько самостоятельно агент разбирает конфликты. Читает это скилл,
 #: сама утилита ничего по ней не делает — но проверяет значение и
@@ -46,7 +72,8 @@ CONFIG_TEMPLATE = """\
 scan_limit = 30
 
 # Как глубоко читать целевую историю в поисках трейлера
-# (cherry picked from commit ...). Самый надёжный канал: окно определяет,
+# (cherry picked from commit ...). Работает, только если трейлер включён
+# (см. trailer ниже) — зато тогда это самый надёжный канал: окно определяет,
 # на сколько своих коммитов назад утилита помнит, что уже переносила.
 # Читается быстро, уменьшать смысла нет.
 dedup_window = 5000
@@ -54,6 +81,29 @@ dedup_window = 5000
 # Окно сравнения по patch-id — эвристика для пометки ~.
 # Дороже, но результат кэшируется.
 patchid_window = 1000
+
+# Дописывать ли в сообщение перенесённого коммита строку
+# (cherry picked from commit <sha>). По умолчанию нет: сообщение едет
+# один в один. Цена — самый надёжный канал дедупликации выключен, и о том,
+# что коммит уже переносили, утилита знает только из своего state (эта
+# машина) и по patch-id (эвристика ≈). Разово: --trailer / --no-trailer.
+trailer = false
+
+# Схлопывать ли выбранные коммиты в один. По умолчанию нет — сколько
+# коммитов выбрали, столько и приедет. true — вся серия становится одним
+# коммитом с общим сообщением. Разово: --squash / --no-squash,
+# своё сообщение — --message "...".
+squash = false
+
+# Оставлять ли автором перенесённого коммита автора исходного.
+# По умолчанию нет: автором (и коммиттером) становится тот, кто переносит,
+# дата авторства — момент переноса. Разово: --keep-author / --reset-author.
+keep_author = false
+
+# Потолок на один вызов git, секунды. Страховка от зависания: git, севший
+# ждать ввода (редактор, пейджер, запрос пароля), иначе держит утилиту
+# вечно. 0 — без ограничения.
+git_timeout = 600
 
 # Журнал прогонов: что запускалось, с каким кодом и где встало.
 # Лежит рядом со state, вне рабочих репозиториев, в git не попадает.
@@ -78,6 +128,9 @@ resolve_conflicts = "mechanical"
 # a = "/path/to/repo-a"
 # b = "/path/to/repo-b"
 # branch = "master"        # одна ветка с обеих сторон
+#
+# trailer, keep_author, squash, scan_limit, dedup_window и patchid_window можно
+# переопределить внутри профиля.
 #
 # [profiles.myproj-release]  # та же пара, другие ветки
 # a = "/path/to/repo-a"
@@ -169,6 +222,13 @@ class Profile:
     #: где мы советуем человеку, какой ключ конфига править.
     source_key: str = "a"
     target_key: str = "b"
+    #: Оставлять ли в перенесённом коммите автора исходного. По умолчанию
+    #: нет: автором становится тот, кто переносит.
+    keep_author: bool = DEFAULT_KEEP_AUTHOR
+    #: Дописывать ли трейлер `(cherry picked from commit ...)`.
+    trailer: bool = DEFAULT_TRAILER
+    #: Схлопывать ли всю серию в один коммит.
+    squash: bool = DEFAULT_SQUASH
 
     @property
     def alias(self) -> str:
@@ -227,6 +287,9 @@ class Pair:
     scan_limit: int
     dedup_window: int
     patchid_window: int
+    keep_author: bool = DEFAULT_KEEP_AUTHOR
+    trailer: bool = DEFAULT_TRAILER
+    squash: bool = DEFAULT_SQUASH
     #: Для старого формата source/target направление задано самими ключами,
     #: и спрашивать о нём нечего. У пары a/b его выбирают при вызове.
     implied: str | None = None
@@ -253,6 +316,9 @@ class Pair:
             target_prefix=target.prefix,
             source_key=source.key,
             target_key=target.key,
+            keep_author=self.keep_author,
+            trailer=self.trailer,
+            squash=self.squash,
         )
 
 
@@ -264,6 +330,8 @@ class Config:
     log_file: Path | None = None
     #: Политика для скилла git-xfer, не для самой утилиты.
     resolve_conflicts: str = DEFAULT_RESOLVE
+    #: Потолок на один вызов git, секунды; 0 — без ограничения.
+    git_timeout: int = DEFAULT_GIT_TIMEOUT
 
     def pair(self, name: str | None) -> Pair:
         if not name:
@@ -294,6 +362,23 @@ def _require_int(table: dict, key: str, where: str, default: int) -> int:
     return value
 
 
+def _require_bool(table: dict, key: str, where: str, default: bool) -> bool:
+    value = table.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{where}: {key!r} должен быть true или false")
+    return value
+
+
+def _require_timeout(table: dict, key: str, where: str, default: int) -> int:
+    """Секунды; 0 — без ограничения, отрицательное — ошибка."""
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(
+            f"{where}: {key!r} должен быть целым числом секунд (0 — без ограничения)"
+        )
+    return value
+
+
 def adhoc_profile(
     *,
     name: str,
@@ -308,6 +393,9 @@ def adhoc_profile(
     target_prefix: str = "",
     source_key: str = "a",
     target_key: str = "b",
+    keep_author: bool = DEFAULT_KEEP_AUTHOR,
+    trailer: bool = DEFAULT_TRAILER,
+    squash: bool = DEFAULT_SQUASH,
 ) -> Profile:
     """Направление, собранное из флагов или ответов, а не из конфига."""
     return Profile(
@@ -323,6 +411,9 @@ def adhoc_profile(
         target_prefix=normalize_prefix(target_prefix, "--target-prefix"),
         source_key=source_key,
         target_key=target_key,
+        keep_author=keep_author,
+        trailer=trailer,
+        squash=squash,
     )
 
 
@@ -357,6 +448,9 @@ def _parse_pair(
     scan_limit: int,
     dedup: int,
     window: int,
+    keep_author: bool,
+    trailer: bool,
+    squash: bool,
 ) -> "Pair":
     """Разобрать профиль. Понимает и старый формат source/target."""
     new_style = "a" in table or "b" in table
@@ -412,6 +506,9 @@ def _parse_pair(
         scan_limit=_require_int(table, "scan_limit", where, scan_limit),
         dedup_window=_require_int(table, "dedup_window", where, dedup),
         patchid_window=_require_int(table, "patchid_window", where, window),
+        keep_author=_require_bool(table, "keep_author", where, keep_author),
+        trailer=_require_bool(table, "trailer", where, trailer),
+        squash=_require_bool(table, "squash", where, squash),
     )
 
 
@@ -454,6 +551,10 @@ def load_config(path: Path | None = None) -> Config:
     scan_limit = _require_int(defaults, "scan_limit", "[defaults]", DEFAULT_SCAN_LIMIT)
     dedup = _require_int(defaults, "dedup_window", "[defaults]", DEFAULT_DEDUP_WINDOW)
     window = _require_int(defaults, "patchid_window", "[defaults]", DEFAULT_PATCHID_WINDOW)
+    keep_author = _require_bool(defaults, "keep_author", "[defaults]", DEFAULT_KEEP_AUTHOR)
+    trailer = _require_bool(defaults, "trailer", "[defaults]", DEFAULT_TRAILER)
+    squash = _require_bool(defaults, "squash", "[defaults]", DEFAULT_SQUASH)
+    git_timeout = _require_timeout(defaults, "git_timeout", "[defaults]", DEFAULT_GIT_TIMEOUT)
 
     raw_profiles = data.get("profiles") or {}
     if not isinstance(raw_profiles, dict):
@@ -471,6 +572,9 @@ def load_config(path: Path | None = None) -> Config:
             scan_limit=scan_limit,
             dedup=dedup,
             window=window,
+            keep_author=keep_author,
+            trailer=trailer,
+            squash=squash,
         )
     if not profiles:
         raise ConfigError(f"{path}: не описан ни один профиль [profiles.<имя>]")
@@ -480,6 +584,7 @@ def load_config(path: Path | None = None) -> Config:
         log_enabled=log_enabled,
         log_file=log_file,
         resolve_conflicts=resolve,
+        git_timeout=git_timeout,
     )
 
 

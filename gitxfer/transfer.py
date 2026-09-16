@@ -27,6 +27,21 @@ from .preflight import git_path, head_sha
 from .prefix import Projector
 from .state import Progress, State
 
+#: Служебные коммиты git-xfer идут мимо хуков всегда, даже при `--hooks`.
+#: `--hooks` означает «прогнать хуки на переносимом коммите», и это делает
+#: `cherry-pick`. Amend авторства и схлопывание — не отдельные изменения,
+#: а доводка того же самого: `pre-commit`, который `cherry-pick` не зовёт
+#: вовсе, порвал бы на них серию, а `post-commit` отработал бы дважды.
+NO_HOOKS = ("core.hooksPath=/dev/null",)
+
+#: Как вели себя опции до того, как они стали настраиваемыми. Нужно ровно
+#: для одного случая: серия начата прошлой версией, застряла на конфликте,
+#: а `continue` зовёт уже новая.
+LEGACY_OPTIONS = {"trailer": True, "keep_author": True, "squash": False}
+
+US = "\x1f"  # разделитель полей
+RS = "\x1e"  # разделитель записей
+
 #: Статусы шага.
 OK = "ok"
 EMPTY = "empty"
@@ -39,12 +54,32 @@ FAILED = "failed"
 class Options:
     """Опции применения. Дефолты — как описано в README."""
 
-    trailer: bool = True                  # -x: (cherry picked from commit <sha>)
+    #: -x: дописать в сообщение `(cherry picked from commit <sha>)`. Дефолты
+    #: тут и у `keep_author` — дефолты продукта, а не «как было»: серия,
+    #: начатая версией без этих ключей и застрявшая на конфликте, доиграется
+    #: новыми правилами. Обычный путь другой — значения кладёт `cli`
+    #: из профиля, и они переживают паузу вместе с остальными опциями.
+    trailer: bool = False
     empty: str = "drop"                   # коммит, ставший пустым, — уже перенесённый
     allow_merges: bool = False            # -m 1 схлопывает влитую ветку, почти никогда не то
     hooks: bool = False                   # падающий линтер не должен рвать серию
     gpg_sign: bool = False
     keep_committer_date: bool = False     # ломает предположение git о неубывающих таймстампах
+    #: Оставить автором перенесённого коммита автора исходного. По умолчанию
+    #: нет: cherry-pick тащит авторство за собой, а при переносе между своими
+    #: репозиториями в целевой истории нужен тот, кто переносит. Значение
+    #: берётся из профиля (`keep_author` в конфиге) или из флагов
+    #: --keep-author / --reset-author; здесь — дефолт продукта, чтобы серия,
+    #: начатая ещё до появления ключа, доигралась предсказуемо.
+    keep_author: bool = False
+    #: Схлопнуть всю серию в один коммит. Делается не отдельным механизмом,
+    #: а поверх обычного: очередь проигрывается как всегда — с конфликтами,
+    #: паузой и `continue` — и только в самом конце получившиеся коммиты
+    #: сворачиваются в один. Поэтому squash ничего не меняет ни в разборе
+    #: конфликтов, ни в проекции префикса.
+    squash: bool = False
+    #: Сообщение схлопнутого коммита. Пусто — склеим из сообщений серии.
+    message: str = ""
     #: Подкаталоги сторон. Живут здесь, а не берутся из профиля на каждом
     #: шаге, ровно по той же причине, что и остальные опции: серия должна
     #: доиграться теми правилами, с которыми начиналась, даже если конфиг
@@ -58,8 +93,18 @@ class Options:
 
     @classmethod
     def from_json(cls, data: dict | None) -> "Options":
+        """Опции начатой серии из state.
+
+        Ключа в записи нет — значит state писала версия, где его ещё не
+        существовало, и серия начиналась с тогдашним поведением. Дефолт
+        класса тут не годится: он описывает то, чего эта серия не знала,
+        и половина её коммитов доигралась бы по другим правилам, чем
+        первая.
+        """
         data = data or {}
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
+        for field_name, legacy in LEGACY_OPTIONS.items():
+            known.setdefault(field_name, legacy)
         return cls(**known)
 
 
@@ -76,6 +121,9 @@ class Outcome:
     results: list[StepResult] = field(default_factory=list)
     conflict: str | None = None
     remaining: list[str] = field(default_factory=list)
+    #: Итоговый коммит, если серию схлопнули, и сколько коммитов в него вошло.
+    squashed: str = ""
+    squashed_count: int = 0
 
     @property
     def exit_code(self) -> int:
@@ -128,10 +176,147 @@ def _pick_args(
         # Переносится уже проверенный коммит; падающий pre-commit не должен рвать серию.
         config.append("core.hooksPath=/dev/null")
 
-    env: dict[str, str] = {}
-    if options.keep_committer_date:
-        env["GIT_COMMITTER_DATE"] = git.out("show", "-s", "--format=%cI", origin)
-    return args, config, env
+    return args, config, _committer_env(git, options, origin)
+
+
+def _committer_env(git: Git, options: Options, sha: str) -> dict[str, str]:
+    """Окружение коммита: только --keep-committer-date и только он."""
+    if not options.keep_committer_date:
+        return {}
+    return {"GIT_COMMITTER_DATE": git.out("show", "-s", "--format=%cI", sha)}
+
+
+def reset_author(git: Git, options: Options, env: dict[str, str] | None = None) -> str:
+    """Переписать авторство последнего коммита на того, кто переносит.
+
+    `cherry-pick` своего `--reset-author` не имеет: авторство он всегда берёт
+    из исходного коммита. Поэтому сразу после коммита правим его `--amend`,
+    пока он ещё вершина ветки и никто его не видел. `--allow-empty` нужен
+    из-за `--empty=keep`, `--no-edit` — чтобы не открылся редактор.
+    Возвращает новый HEAD.
+    """
+    args = ["commit", "--amend", "--reset-author", "--no-edit", "--allow-empty"]
+    args.append("--gpg-sign" if options.gpg_sign else "--no-gpg-sign")
+    result = git.run(
+        *args, check=False, config=NO_HOOKS, env=env or {}, mutating=True
+    )
+    if not result.ok:
+        raise XferError(
+            "не удалось переписать авторство перенесённого коммита:\n"
+            + result.describe()
+        )
+    return head_sha(git) or ""
+
+
+def _author_env(git: Git, sha: str) -> dict[str, str]:
+    """Авторство коммита `sha` как окружение для нового коммита."""
+    name, email, date = git.out("show", "-s", f"--format=%an{US}%ae{US}%aI", sha).split(US)
+    return {
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_AUTHOR_DATE": date,
+    }
+
+
+def collected_message(git: Git, base: str) -> str:
+    """Сообщения коммитов `base..HEAD` подряд, от старого к новому.
+
+    Берём их у уже применённых коммитов, а не у оригиналов: в них есть
+    и трейлер (если он включён), и правки, которые человек внёс, разрешая
+    конфликт, — то есть ровно то, что и должно приехать в итоговый коммит.
+    """
+    raw = git.out("log", "--reverse", f"--format=%B{RS}", f"{base}..HEAD", "--")
+    parts = [part.strip() for part in raw.split(RS)]
+    return "\n\n".join(part for part in parts if part)
+
+
+def retitle(git: Git, options: Options, message: str) -> str:
+    """Переписать сообщение последнего коммита, не трогая всё остальное."""
+    args = ["commit", "--amend", "--allow-empty", "-F", "-"]
+    args.append("--gpg-sign" if options.gpg_sign else "--no-gpg-sign")
+    result = git.run(
+        *args, check=False, config=NO_HOOKS, stdin=message + "\n", mutating=True
+    )
+    if not result.ok:
+        raise XferError(
+            "не удалось записать сообщение из --message:\n" + result.describe()
+        )
+    return head_sha(git) or ""
+
+
+def collapse(
+    git: Git,
+    state: State,
+    progress: Progress,
+    options: Options,
+    outcome: Outcome,
+    report: Reporter,
+) -> None:
+    """Свернуть уже применённую серию в один коммит.
+
+    `reset --soft` к тому HEAD, с которого серия начиналась: дерево и индекс
+    остаются с результатом всей серии, а история схлопывается. Так squash
+    не нужно объяснять ни очереди, ни конфликту, ни проекции — они уже
+    отработали.
+    """
+    picked = [step["src"] for step in progress.done if step["status"] == OK]
+    base = progress.head_before
+    head = head_sha(git) or ""
+    if len(picked) < 2 or not base or head == base:
+        # Схлопывать нечего: коммит один или серия не дала ни одного.
+        # Сообщение при этом просили не для схлопывания, а для того, что
+        # приедет, — молча потерять его нельзя.
+        if len(picked) == 1 and options.message.strip() and head != base:
+            retitle(git, options, options.message.strip())
+            report(
+                "  схлопывать было нечего — приехал один коммит; "
+                "сообщение из --message на нём"
+            )
+        return
+    env = _committer_env(git, options, picked[-1])
+    if options.keep_author:
+        # Автор — тот, с кого серия начиналась: остальные его сообщения
+        # всё равно уехали в общий текст.
+        env.update(_author_env(git, picked[0]))
+    message = options.message.strip() or collected_message(git, base)
+    args = ["commit", "--allow-empty", "-F", "-"]
+    args.append("--gpg-sign" if options.gpg_sign else "--no-gpg-sign")
+    git.run("reset", "--soft", base, mutating=True)
+    try:
+        # Между `reset` и `commit` ветка стоит отмотанной на начало серии:
+        # коммитов на ней уже нет, а нового ещё нет. Любой выход отсюда —
+        # ошибка, таймаут, Ctrl+C — обязан вернуть её обратно, иначе серия
+        # окажется потерянной для всех, кроме reflog.
+        result = git.run(
+            *args, check=False, config=NO_HOOKS, env=env, stdin=message + "\n", mutating=True
+        )
+        if not result.ok:
+            raise XferError(
+                "не удалось схлопнуть серию в один коммит:\n" + result.describe()
+            )
+    except BaseException:
+        # `reset --soft` не трогал ни дерево, ни индекс, поэтому обратный
+        # `--soft` возвращает ровно то, что было.
+        git.run("reset", "--soft", head, check=False, mutating=True)
+        logbook.error("схлопывание не удалось, ветка возвращена на %s", head)
+        raise
+    squashed = head_sha(git) or ""
+    # Маппинг обязан указывать на коммит, который и правда есть в истории:
+    # промежуточных больше нет, и без этого дедупликация решила бы, что
+    # ничего не переносилось.
+    for sha in picked:
+        state.remember(sha, squashed)
+    progress.expected_head = squashed
+    for step in progress.done:
+        if step["status"] == OK:
+            step["dst"] = squashed
+    for step_result in outcome.results:
+        if step_result.status == OK:
+            step_result.dst = squashed
+    outcome.squashed = squashed
+    outcome.squashed_count = len(picked)
+    logbook.info("схлопнуто %d коммит(ов) в %s", len(picked), squashed)
+    report(f"  {len(picked)} коммит(ов) схлопнуты в один: {squashed[:12]}")
 
 
 def is_merge_commit(git: Git, sha: str) -> bool:
@@ -165,7 +350,13 @@ def pick(
     result = git.run(*args, check=False, config=config, env=env, mutating=True)
     after = head_sha(git) or ""
     if result.ok:
-        return (OK if after != before else EMPTY), result, after
+        if after != before:
+            if not options.keep_author:
+                # env тот же: --keep-committer-date должен пережить amend,
+                # иначе committer date стал бы временем переписывания.
+                after = reset_author(git, options, env) or after
+            return OK, result, after
+        return EMPTY, result, after
     if git_path(git, "CHERRY_PICK_HEAD").exists():
         return CONFLICT, result, after
     return FAILED, result, after
@@ -208,7 +399,15 @@ def _drain(
         subject = git.out("show", "-s", "--format=%s", sha)
         report(f"[{index}/{total}] {sha[:12]} {subject}")
         logbook.info("шаг %d/%d: беру %s %s", index, total, sha, subject)
-        status, result, head = pick(git, sha, options, projector)
+        try:
+            status, result, head = pick(git, sha, options, projector)
+        except XferError:
+            # Упасть можно и после того, как коммит уже создан: на amend
+            # авторства или на таймауте. Тогда шаг состоялся, и state обязан
+            # это знать — иначе `continue` увидит уехавший HEAD и откажется
+            # работать, а повторный `apply` продублирует коммит.
+            _record_interrupted(git, state, progress, outcome, sha)
+            raise
         logbook.info("шаг %d/%d: %s → %s", index, total, status, head or "HEAD не сдвинулся")
         if status == CONFLICT:
             progress.expected_head = head
@@ -245,10 +444,34 @@ def _drain(
         progress.expected_head = head or progress.expected_head
         state.save()
     progress.current = None
+    if options.squash:
+        collapse(git, state, progress, options, outcome, report)
     state.in_progress = None
     state.save()
     projector.unpin()
     return outcome
+
+
+def _record_interrupted(
+    git: Git, state: State, progress: Progress, outcome: Outcome, sha: str
+) -> None:
+    """Сохранить состояние шага, оборвавшегося исключением.
+
+    Смотрим по HEAD, успел ли git закоммитить: если да — шаг состоялся,
+    и упало то, что идёт следом; если нет — коммит возвращается в очередь.
+    В обоих случаях state должен описывать репозиторий как он есть, чтобы
+    `continue` продолжил, а не упёрся в «HEAD не там, где мы его оставили».
+    """
+    head = head_sha(git) or ""
+    if head and head != progress.expected_head:
+        _record(state, progress, outcome, sha, OK, head)
+        progress.expected_head = head
+    else:
+        progress.queue.insert(0, sha)
+        progress.current = None
+    state.in_progress = progress
+    state.save()
+
 
 
 def _record(
@@ -416,7 +639,13 @@ def resume(
             _record(state, progress, outcome, current, SKIPPED, "", detail="пропущен вручную")
             report(f"  {current[:12]} пропущен")
         elif in_pick:
-            result = git.run("cherry-pick", "--continue", check=False, mutating=True)
+            result = git.run(
+                "cherry-pick",
+                "--continue",
+                check=False,
+                env=_committer_env(git, options, current),
+                mutating=True,
+            )
             if not result.ok:
                 raise XferError(
                     "git cherry-pick --continue не прошёл — конфликт ещё не разрешён:\n"
@@ -424,6 +653,10 @@ def resume(
                 )
             head = head_sha(git) or ""
             status = OK if head != progress.expected_head else EMPTY
+            if status == OK and not options.keep_author:
+                # Коммит разрешённого конфликта делает git, авторство он
+                # тянет из исходного так же, как на обычном шаге.
+                head = reset_author(git, options, _committer_env(git, options, current)) or head
             _record(state, progress, outcome, current, status, head)
             report(
                 f"  {current[:12]} доведён до коммита"
@@ -437,6 +670,13 @@ def resume(
                 report(f"  {current[:12]} не оставил изменений — пропущен")
             elif _one_commit_ahead(git, progress.expected_head, head):
                 # Человек закоммитил разрешение сам — принимаем как есть.
+                # Авторство всё равно наше дело: git, коммитя разрешённый
+                # конфликт, сохраняет автора оригинала, и без этого шага
+                # один коммит серии молча выбился бы из остальных.
+                if not options.keep_author:
+                    head = reset_author(
+                        git, options, _committer_env(git, options, current)
+                    ) or head
                 _record(state, progress, outcome, current, OK, head, detail="закоммичен вручную")
                 report(f"  {current[:12]} уже закоммичен вручную ({head[:12]})")
             else:

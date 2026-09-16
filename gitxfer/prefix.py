@@ -138,7 +138,7 @@ class Projector:
         found = subtree(self.git, rev, self.source_prefix)
         return nest(self.git, found or self._empty_tree(), self.target_prefix)
 
-    def commit(self, sha: str, *, trailer: bool = True) -> str | None:
+    def commit(self, sha: str, *, trailer: bool = False) -> str | None:
         """Синтезировать коммит с переписанными путями.
 
         None — коммит не задел подкаталог, переносить нечего.

@@ -103,11 +103,22 @@ printf 'l1\nl2\nRESOLVED\nl4\nl5\n' > "$WORK/b/src/app.py"
 git -C "$WORK/b" add src/app.py
 OUT=$(xfer continue -p t --to b 2>&1); CODE=$?
 check 0 $CODE "continue довёл очередь до конца"
-LOG=$(git -C "$WORK/b" log -5 --format='%H %an %ad' --date=short)
-has "Ann Source 2024-02-05" "$LOG" "автор и author date сохранены"
+# Дефолты: автором становится тот, кто переносит (в b это Bob Target),
+# а сообщение едет один в один — ни трейлера, ни другой приписки.
+AUTHORS=$(git -C "$WORK/b" log -4 --format='%an')
+check 0 "$(printf '%s\n' "$AUTHORS" | grep -c 'Ann Source' || true)" "автор источника не приехал"
+check 4 "$(printf '%s\n' "$AUTHORS" | grep -c 'Bob Target' || true)" "автор — тот, кто переносит, и у конфликтного тоже"
+# У коммита два поля, и по умолчанию оба наши: author — кто написал,
+# committer — кто применил. «Мы» — это user.name целевого репозитория.
+check 4 "$(git -C "$WORK/b" log -4 --format='%cn' | grep -c 'Bob Target' || true)" "коммиттер — тоже тот, кто переносит"
+TODAY=$(date +%Y-%m-%d)
+check 4 "$(git -C "$WORK/b" log -4 --format='%ad' --date=short | grep -c "$TODAY" || true)" "author date — момент переноса"
 BODY=$(git -C "$WORK/b" log -4 --format='%B')
-COUNT=$(printf '%s\n' "$BODY" | grep -c "cherry picked from commit")
-check 4 "$COUNT" "трейлер есть у всех четырёх, включая конфликтный"
+check 0 "$(printf '%s\n' "$BODY" | grep -c "cherry picked from commit" || true)" "сообщение перенесено один в один"
+has "chore: бинарный ассет" "$(git -C "$WORK/b" log -4 --format='%s')" "заголовки коммитов на месте"
+# Без трейлера «уже переносили» помнит только маппинг в state — проверяем,
+# что он и правда за это отвечает, пока state цел.
+has "− .*бинарный ассет" "$(xfer list -p t --to b)" "перенесённое помечено − по маппингу из state"
 
 echo "== 6. abort оставляет уже перенесённое =="
 printf 'helper\n' > "$WORK/a/src/helper.py"
@@ -137,7 +148,10 @@ xfer cleanup -p t --to b --state >/dev/null 2>&1
 echo "== 8. повторный list и cleanup =="
 xfer sync -p t --to b >/dev/null
 OUT=$(xfer list -p t --to b)
-has "− .*бинарный ассет" "$OUT" "перенесённый коммит помечен − по трейлеру"
+# Секция 7 закончилась `cleanup --state`: маппинга больше нет, трейлера не
+# было — остаётся только эвристика patch-id. Это и есть цена выключенного
+# по умолчанию трейлера, и она должна быть видна в тесте.
+has "≈ .*бинарный ассет" "$OUT" "без трейлера и state остаётся только patch-id"
 xfer cleanup -p t --to b >/dev/null
 check "" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)" "refs/xfer/* убраны"
 
@@ -597,9 +611,9 @@ check 0 $CODE "перенос прошёл"
 check 0 "$(git -C "$WORK/n" ls-files | grep -c '^android/' || true)" "лишней вложенности android/ не появилось"
 check 1 "$(git -C "$WORK/n" ls-files | grep -c '^icons/star.svg$' || true)" "файл лёг в корень целевого репозитория"
 BODY=$(git -C "$WORK/n" log -1 --format=%B)
-has "cherry picked from commit $SRC_STAR" "$BODY" "трейлер указывает на оригинальный коммит источника"
+check 0 "$(printf '%s\n' "$BODY" | grep -c "cherry picked from commit" || true)" "сообщение проекции тоже без трейлера"
 check 1 "$(git -C "$WORK/n" log -1 --format=%P | wc -w | tr -d ' ')" "у перенесённого коммита один родитель"
-has "Ann Source" "$(git -C "$WORK/n" log -1 --format='%an')" "автор оригинала сохранён"
+has "Bob Target" "$(git -C "$WORK/n" log -1 --format='%an')" "автором проекции стал тот, кто переносит"
 
 echo "== 33. префикс: пограничный коммит приезжает частично =="
 SRC_BOTH=$(git -C "$WORK/m" log --format='%H %s' | grep 'fix: звезда и сборка' | cut -d' ' -f1)
@@ -712,6 +726,30 @@ sys.path.insert(0, sys.argv[1])
 from gitxfer.config import CONFIG_TEMPLATE
 sys.exit(0 if "a_prefix" in CONFIG_TEMPLATE else 1)
 PY
+# Дефолты «сообщение один в один» и «автор — тот, кто переносит» должны быть
+# описаны там же, где человек и агент их ищут, иначе сюрприз обеспечен.
+doc "keep_author" "$ROOT/config.example.toml" "пример конфига описывает keep_author"
+doc "trailer" "$ROOT/config.example.toml" "пример конфига описывает trailer"
+doc "keep_author" "$ROOT/README.md" "README описывает keep_author"
+doc "--reset-author" "$ROOT/README.md" "README описывает флаги авторства"
+doc "git_timeout" "$ROOT/README.md" "README описывает git_timeout"
+doc "keep_author" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает про keep_author"
+doc "squash" "$ROOT/config.example.toml" "пример конфига описывает squash"
+doc "--squash" "$ROOT/README.md" "README описывает squash"
+# Скилл обязан СПРАШИВАТЬ про схлопывание, а не решать сам: обещание
+# «одним коммитом или по одному» должно быть прописано словами.
+doc "одним или по одному" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про схлопывание"
+# Скилл обязан прямым текстом запрещать интерактивные вызовы: именно на них
+# агент без терминала встаёт намертво.
+doc "Никогда не запускай" "$ROOT/skills/git-xfer/SKILL.md" "скилл запрещает интерактив списком"
+doc "Если команда не отвечает" "$ROOT/skills/git-xfer/SKILL.md" "и учит, что делать при зависании"
+python3 - "$ROOT" <<'TEMPLATE_PY' && ok "шаблон init описывает новые ключи" || bad "шаблон init описывает новые ключи"
+import sys
+sys.path.insert(0, sys.argv[1])
+from gitxfer.config import CONFIG_TEMPLATE
+sys.exit(0 if all(k in CONFIG_TEMPLATE for k in ("keep_author", "trailer", "squash", "git_timeout")) else 1)
+TEMPLATE_PY
+
 if sed -n '/Что не входит в эту версию/,$p' "$ROOT/README.md" | grep -q "префикс"; then
   bad "пункт про префикс убран из «что не входит»"
 else
@@ -719,6 +757,317 @@ else
 fi
 
 printf '%s\n' "$MAIN_CONFIG" > "$WORK/config/git-xfer/config.toml"
+
+echo "== 42. авторство и трейлер: дефолт, флаги, конфиг =="
+src_commit() { # файл содержимое сообщение дата
+  printf '%s\n' "$2" > "$WORK/a/$1"
+  git -C "$WORK/a" add "$1"
+  GIT_AUTHOR_NAME="Ann Source" GIT_AUTHOR_EMAIL=ann@example.com \
+  GIT_COMMITTER_NAME="Ann Source" GIT_COMMITTER_EMAIL=ann@example.com \
+  GIT_AUTHOR_DATE="$4" GIT_COMMITTER_DATE="$4" git -C "$WORK/a" commit -q -m "$3"
+}
+src_commit "src/alpha.py" "def alpha(): return 1" "feat: alpha" "2024-05-01T09:00:00+00:00"
+src_commit "src/beta.py" "def beta(): return 2" "feat: beta" "2024-05-02T09:00:00+00:00"
+ALPHA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: alpha' | cut -d' ' -f1)
+BETA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: beta' | cut -d' ' -f1)
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer sync -p t --to b >/dev/null
+
+# Флаги разово возвращают прежнее поведение.
+xfer apply -p t --to b --sha "$ALPHA" --yes --keep-author --trailer >/dev/null 2>&1
+check 0 $? "перенос с --keep-author --trailer прошёл"
+check "Ann Source" "$(git -C "$WORK/b" log -1 --format='%an')" "--keep-author вернул автора оригинала"
+# keep_author трогает только author: committer'ом в git всегда остаётся тот,
+# кто применил коммит, — так эта пара и должна выглядеть.
+check "Bob Target" "$(git -C "$WORK/b" log -1 --format='%cn')" "а коммиттером всё равно остался тот, кто переносит"
+check "2024-05-01" "$(git -C "$WORK/b" log -1 --format='%ad' --date=short)" "и его author date"
+has "cherry picked from commit $ALPHA" "$(git -C "$WORK/b" log -1 --format=%B)" "--trailer вернул трейлер"
+
+# То же самое, но из конфига профиля и без единого флага.
+cat > "$WORK/keep.toml" <<EOF
+[defaults]
+keep_author = true
+trailer = true
+
+[profiles.t]
+a = "$WORK/a"
+b = "$WORK/b"
+branch = "master"
+
+[profiles.plain]
+a = "$WORK/a"
+b = "$WORK/b"
+branch = "master"
+keep_author = false
+trailer = false
+EOF
+OUT=$(xfer status --config "$WORK/keep.toml" -p t --to b 2>&1)
+has "автор исходного коммита сохраняется" "$OUT" "status показывает режим авторства"
+has "трейлер" "$OUT" "status показывает режим сообщения"
+xfer apply --config "$WORK/keep.toml" -p t --to b --sha "$BETA" --yes >/dev/null 2>&1
+check 0 $? "перенос по конфигу с keep_author/trailer прошёл"
+check "Ann Source" "$(git -C "$WORK/b" log -1 --format='%an')" "keep_author из конфига сработал"
+has "cherry picked from commit $BETA" "$(git -C "$WORK/b" log -1 --format=%B)" "trailer из конфига сработал"
+
+# Профиль перебивает [defaults], флаг перебивает профиль.
+OUT=$(xfer status --config "$WORK/keep.toml" -p plain --to b 2>&1)
+has "автором станет тот, кто переносит" "$OUT" "профиль перебивает [defaults]"
+git -C "$WORK/b" reset -q --hard HEAD~1
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer apply --config "$WORK/keep.toml" -p t --to b --sha "$BETA" --yes --reset-author --no-trailer >/dev/null 2>&1
+check "Bob Target" "$(git -C "$WORK/b" log -1 --format='%an')" "--reset-author перебивает конфиг"
+check 0 "$(git -C "$WORK/b" log -1 --format=%B | grep -c 'cherry picked from commit' || true)" "--no-trailer перебивает конфиг"
+OUT=$(xfer apply -p t --to b --sha "$BETA" --yes --keep-author --reset-author 2>&1); CODE=$?
+check 1 $CODE "--keep-author вместе с --reset-author отвергнуты"
+
+echo "== 44. squash: серия схлопывается в один коммит =="
+src_commit "src/gamma.py" "def gamma(): return 3" "feat: gamma" "2024-05-03T09:00:00+00:00"
+src_commit "src/delta.py" "def delta(): return 4" "feat: delta" "2024-05-04T09:00:00+00:00"
+src_commit "src/eps.py" "def eps(): return 5" "feat: eps" "2024-05-05T09:00:00+00:00"
+GAMMA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: gamma' | cut -d' ' -f1)
+DELTA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: delta' | cut -d' ' -f1)
+EPS=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: eps' | cut -d' ' -f1)
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer sync -p t --to b >/dev/null
+BEFORE=$(git -C "$WORK/b" rev-parse HEAD)
+OUT=$(xfer apply -p t --to b --sha "$GAMMA" "$DELTA" "$EPS" --yes --squash 2>&1); CODE=$?
+check 0 $CODE "перенос со --squash прошёл"
+check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "в цели появился ровно один коммит"
+has "Схлопнуто в один коммит" "$OUT" "итог сказал, что схлопнул"
+BODY=$(git -C "$WORK/b" log -1 --format=%B)
+has "feat: gamma" "$BODY" "сообщение собрано из первого коммита"
+has "feat: eps" "$BODY" "и из последнего"
+check 3 "$(git -C "$WORK/b" show --name-only --format= HEAD | grep -c '^src/' || true)" "все три файла приехали одним коммитом"
+check "Bob Target" "$(git -C "$WORK/b" log -1 --format='%an')" "автор схлопнутого — тот, кто переносит"
+# Маппинг обязан указывать на существующий коммит, иначе дедупликация решит,
+# что ничего не переносилось.
+OUT=$(xfer list -p t --to b)
+check 3 "$(printf '%s\n' "$OUT" | grep -c '− .*feat: \(gamma\|delta\|eps\)' || true)" "все три помечены как перенесённые"
+
+echo "== 45. squash: своё сообщение, конфиг, конфликт =="
+git -C "$WORK/b" reset -q --hard "$BEFORE"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer apply -p t --to b --sha "$GAMMA" "$DELTA" --yes --squash --message "feat: гамма и дельта разом" >/dev/null 2>&1
+check "feat: гамма и дельта разом" "$(git -C "$WORK/b" log -1 --format=%s)" "--message задаёт сообщение схлопнутого"
+OUT=$(xfer apply -p t --to b --sha "$EPS" --yes --message "просто так" 2>&1); CODE=$?
+check 1 $CODE "--message без --squash — ошибка вызова"
+has "без --squash" "$OUT" "и объяснено почему"
+
+cat > "$WORK/squash.toml" <<EOF
+[defaults]
+squash = true
+
+[profiles.t]
+a = "$WORK/a"
+b = "$WORK/b"
+branch = "master"
+EOF
+OUT=$(xfer status --config "$WORK/squash.toml" -p t --to b 2>&1)
+has "вся серия в один коммит" "$OUT" "status показывает режим схлопывания"
+git -C "$WORK/b" reset -q --hard "$BEFORE"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer apply --config "$WORK/squash.toml" -p t --to b --sha "$GAMMA" "$DELTA" --yes >/dev/null 2>&1
+check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "squash из конфига сработал без флага"
+git -C "$WORK/b" reset -q --hard "$BEFORE"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+xfer apply --config "$WORK/squash.toml" -p t --to b --sha "$GAMMA" "$DELTA" --yes --no-squash >/dev/null 2>&1
+check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "--no-squash перебивает конфиг"
+
+# Схлопывание живёт поверх обычного цикла, поэтому обязано пережить паузу
+# на конфликте: continue доигрывает очередь и сворачивает уже её результат.
+git -C "$WORK/b" reset -q --hard "$BEFORE"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+printf 'l1\nl2\nTARGET-AGAIN\nl4\nl5\n' > "$WORK/b/src/app.py"
+git -C "$WORK/b" -c user.name=Bob -c user.email=bob@example.com commit -q -am "tgt: снова правка app"
+CLASH=$(git -C "$WORK/a" log --format='%H %s' master | grep 'конфликтует' | cut -d' ' -f1)
+BEFORE2=$(git -C "$WORK/b" rev-parse HEAD)
+xfer apply -p t --to b --sha "$GAMMA" "$CLASH" "$DELTA" --yes --squash >/dev/null 2>&1
+check 3 $? "squash-серия встала на конфликте"
+printf 'l1\nl2\nRESOLVED-SQUASH\nl4\nl5\n' > "$WORK/b/src/app.py"
+git -C "$WORK/b" add src/app.py
+OUT=$(xfer continue -p t --to b 2>&1); CODE=$?
+check 0 $CODE "continue довёл squash-серию"
+check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE2"..HEAD)" "и схлопнул её в один коммит"
+has "RESOLVED-SQUASH" "$(cat "$WORK/b/src/app.py")" "разрешение конфликта уехало в итоговый коммит"
+check "" "$(git -C "$WORK/b" status --porcelain=v2)" "после схлопывания дерево чистое"
+
+echo "== 46. падение после созданного коммита оставляет годный state =="
+# Коммит уже создан, а следующий за ним шаг (amend авторства) упал: state
+# обязан знать, что шаг состоялся, иначе continue упрётся в уехавший HEAD,
+# а повторный apply продублирует коммит.
+git -C "$WORK/b" reset -q --hard "$BEFORE2" 2>/dev/null || git -C "$WORK/b" reset -q --hard HEAD
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+src_commit "src/zeta.py" "def zeta(): return 6" "feat: zeta" "2024-05-06T09:00:00+00:00"
+src_commit "src/eta.py" "def eta(): return 7" "feat: eta" "2024-05-07T09:00:00+00:00"
+ZETA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: zeta' | cut -d' ' -f1)
+ETA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: eta' | cut -d' ' -f1)
+xfer sync -p t --to b >/dev/null
+BEFORE3=$(git -C "$WORK/b" rev-parse HEAD)
+XDG_CONFIG_HOME="$WORK/config" XDG_STATE_HOME="$WORK/state" PYTHONPATH="$ROOT" \
+  python3 - "$WORK" "$ZETA" "$ETA" <<'BREAK_PY' >/dev/null 2>&1
+import sys
+from pathlib import Path
+from gitxfer import transfer
+from gitxfer.config import adhoc_profile
+from gitxfer.errors import XferError
+from gitxfer.gitcmd import Git
+from gitxfer.state import State
+
+work, zeta, eta = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+profile = adhoc_profile(
+    name="t", source=work / "a", source_branch="master",
+    target=work / "b", target_branch="master",
+)
+git, state = Git(work / "b"), State.load(work / "b")
+calls = {"n": 0}
+real = transfer.reset_author
+def boom(*args, **kwargs):
+    calls["n"] += 1
+    # Первый коммит доводим честно, на втором падаем ПОСЛЕ cherry-pick.
+    if calls["n"] == 2:
+        raise XferError("подстроенный сбой на доводке авторства")
+    return real(*args, **kwargs)
+transfer.reset_author = boom
+try:
+    transfer.start(git, profile, state, [zeta, eta], transfer.Options())
+except XferError:
+    sys.exit(0)
+sys.exit(1)
+BREAK_PY
+check 0 $? "подстроенный сбой на втором коммите случился"
+check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE3"..HEAD)" "оба коммита в истории: второй успел закоммититься"
+OUT=$(xfer status -p t --to b 2>&1)
+has "сделано 2" "$OUT" "state знает, что оба шага состоялись"
+hasnt "HEAD не там" "$OUT" "и не считает HEAD уехавшим"
+OUT=$(xfer continue -p t --to b 2>&1); CODE=$?
+check 0 $CODE "continue закрывает серию, а не требует разбираться руками"
+check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE3"..HEAD)" "и ничего не продублировал"
+
+echo "== 47. squash: вырожденные случаи и откат =="
+git -C "$WORK/b" reset -q --hard "$BEFORE3"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+src_commit "src/theta.py" "def theta(): return 8" "feat: theta" "2024-05-08T09:00:00+00:00"
+THETA=$(git -C "$WORK/a" log --format='%H %s' | grep 'feat: theta' | cut -d' ' -f1)
+xfer sync -p t --to b >/dev/null
+# Схлопывать нечего, но сообщение просили — потерять его молча нельзя.
+OUT=$(xfer apply -p t --to b --sha "$THETA" --yes --squash --message "feat: одна тета" 2>&1)
+check "feat: одна тета" "$(git -C "$WORK/b" log -1 --format=%s)" "--message применён и к одному коммиту"
+has "схлопывать было нечего" "$OUT" "и сказано, что схлопывать было нечего"
+
+# Между reset --soft и commit ветка стоит отмотанной: сорвавшийся коммит
+# обязан вернуть её, а не оставить серию доступной только через reflog.
+git -C "$WORK/b" reset -q --hard "$BEFORE3"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+BEFORE4=$(git -C "$WORK/b" rev-parse HEAD)
+XDG_CONFIG_HOME="$WORK/config" XDG_STATE_HOME="$WORK/state" PYTHONPATH="$ROOT" \
+  python3 - "$WORK" "$ZETA" "$ETA" <<'ROLLBACK_PY' >/dev/null 2>&1
+import sys
+from pathlib import Path
+from gitxfer import transfer
+from gitxfer.config import adhoc_profile
+from gitxfer.errors import XferError
+from gitxfer.gitcmd import Git
+from gitxfer.state import State
+
+work, zeta, eta = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+profile = adhoc_profile(
+    name="t", source=work / "a", source_branch="master",
+    target=work / "b", target_branch="master",
+)
+git, state = Git(work / "b"), State.load(work / "b")
+# Пустое сообщение — git откажется коммитить ровно посередине схлопывания.
+transfer.collected_message = lambda *a, **kw: ""
+try:
+    transfer.start(git, profile, state, [zeta, eta], transfer.Options(squash=True))
+except XferError:
+    sys.exit(0)
+sys.exit(1)
+ROLLBACK_PY
+check 0 $? "сорвавшееся схлопывание сообщило об ошибке"
+check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE4"..HEAD)" "ветка возвращена: оба коммита серии на месте"
+check "" "$(git -C "$WORK/b" status --porcelain=v2)" "и дерево не осталось раскуроченным"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+git -C "$WORK/b" reset -q --hard "$BEFORE4"
+
+echo "== 48. серия из прошлой версии доигрывается своими правилами =="
+# В state, записанном до появления ключей, их нет — и такая серия обязана
+# доиграться прежним поведением (трейлер + автор оригинала), а не новым.
+git -C "$WORK/b" reset -q --hard "$BEFORE4"
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+CLASH=$(git -C "$WORK/a" log --format='%H %s' master | grep 'конфликтует' | cut -d' ' -f1)
+printf 'l1\nl2\nTARGET-OLD\nl4\nl5\n' > "$WORK/b/src/app.py"
+git -C "$WORK/b" -c user.name=Bob -c user.email=bob@example.com commit -q -am "tgt: правка под конфликт"
+xfer sync -p t --to b >/dev/null
+xfer apply -p t --to b --sha "$CLASH" "$THETA" --yes >/dev/null 2>&1
+check 3 $? "серия встала на конфликте"
+python3 - "$WORK" <<'STRIP_PY'
+import json, sys
+from pathlib import Path
+# Убираем ключи из opts — так выглядит state, записанный прошлой версией.
+for path in (Path(sys.argv[1]) / "state" / "git-xfer").glob("*.json"):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    progress = data.get("in_progress")
+    if not progress:
+        continue
+    for key in ("trailer", "keep_author", "squash", "message"):
+        progress["opts"].pop(key, None)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+STRIP_PY
+OUT=$(xfer status -p t --to b 2>&1)
+has "трейлер" "$OUT" "status показывает опции старой серии, а не новые дефолты"
+printf 'l1\nl2\nRESOLVED-OLD\nl4\nl5\n' > "$WORK/b/src/app.py"
+git -C "$WORK/b" add src/app.py
+xfer continue -p t --to b >/dev/null 2>&1
+check 0 $? "continue доиграл серию из прошлой версии"
+# Коммит, доигранный из очереди уже после подмены state, идёт прежними
+# правилами: с трейлером и с автором оригинала. Конфликтный сюда не входит —
+# его cherry-pick стартовал ещё до подмены, и `--continue` лишь доводит
+# ровно тот вызов, без -x.
+has "cherry picked from commit" "$(git -C "$WORK/b" log -1 --format=%B)" "коммит из очереди получил трейлер, как и начиналось"
+check "Ann Source" "$(git -C "$WORK/b" log -1 --format='%an')" "и автора оригинала, как и начиналось"
+check "Ann Source" "$(git -C "$WORK/b" log -2 --format='%an' | tail -1)" "конфликтный тоже сохранил автора оригинала"
+
+echo "== 49. обратное направление без трейлера =="
+# Маппинг в state заведён на целевой репозиторий и в обратную сторону
+# не читается — скилл и README обязаны обещать именно это.
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+git -C "$WORK/b" reset -q --hard "$BEFORE4"
+xfer sync -p t --to b >/dev/null
+xfer apply -p t --to b --sha "$ZETA" --yes >/dev/null 2>&1
+OUT=$(xfer list -p t --to b)
+has "− .*feat: zeta" "$OUT" "в ту же сторону коммит помечен как перенесённый"
+OUT=$(xfer list -p t --to a 2>&1)
+hasnt "− .*feat: zeta" "$OUT" "а в обратную — не помечен: маппинг односторонний"
+doc "маппинг в state заведён на целевой репозиторий" "$ROOT/skills/git-xfer/SKILL.md" "скилл честно про обратное направление"
+
+echo "== 43. новые ключи конфига проверяются =="
+bad_key() { # файл строка-ключа
+  printf '[defaults]\n%s\n[profiles.x]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
+    "$2" "$WORK/a" "$WORK/b" > "$1"
+}
+bad_key "$WORK/bad-author.toml" 'keep_author = "yes"'
+OUT=$(xfer status --config "$WORK/bad-author.toml" -p x --to b 2>&1); CODE=$?
+check 1 $CODE "keep_author строкой — ошибка конфига"
+has "true или false" "$OUT" "и сказано, что ждали"
+bad_key "$WORK/bad-timeout.toml" 'git_timeout = -5'
+OUT=$(xfer status --config "$WORK/bad-timeout.toml" -p x --to b 2>&1); CODE=$?
+check 1 $CODE "отрицательный git_timeout — ошибка конфига"
+bad_key "$WORK/no-timeout.toml" 'git_timeout = 0'
+xfer status --config "$WORK/no-timeout.toml" -p x --to b >/dev/null 2>&1
+check 0 $? "git_timeout = 0 значит «без ограничения», а не ошибку"
+# Потолок должен и правда прерывать зависший git, а не только считаться.
+python3 - "$ROOT" <<'TIMEOUT_PY' && ok "git, севший ждать, прерывается по таймауту" || bad "git, севший ждать, прерывается по таймауту"
+import sys
+sys.path.insert(0, sys.argv[1])
+from gitxfer.gitcmd import Git, GitTimeout
+git = Git(sys.argv[1], timeout=1)
+try:
+    # Команда, которая никогда не кончится сама, — так выглядит зависание.
+    git.run("-c", "alias.hang=!sleep 30", "hang")
+except GitTimeout:
+    sys.exit(0)
+sys.exit(1)
+TIMEOUT_PY
 
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"

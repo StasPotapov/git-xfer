@@ -19,6 +19,10 @@ if __package__ in (None, ""):  # запустили файлом, а не как
 from . import __version__, logbook
 from .config import (
     DEFAULT_DEDUP_WINDOW,
+    DEFAULT_SQUASH,
+    DEFAULT_GIT_TIMEOUT,
+    DEFAULT_KEEP_AUTHOR,
+    DEFAULT_TRAILER,
     DEFAULT_RESOLVE,
     DEFAULT_PATCHID_WINDOW,
     DEFAULT_SCAN_LIMIT,
@@ -133,6 +137,8 @@ def _current_branch(path: Path | None) -> str | None:
     """Какая ветка сейчас выгружена — годится как подсказка в опросе."""
     if not path or not Path(path).expanduser().exists():
         return None
+    # Конфига на этом шаге ещё нет (его как раз собираем вопросами),
+    # поэтому потолок дефолтный — для одной `symbolic-ref` этого с запасом.
     probe = Git(Path(path).expanduser())
     return probe.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False).text or None
 
@@ -254,6 +260,9 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         target_prefix=dst_prefix,
         source_key=base.source_key if base else "a",
         target_key=base.target_key if base else "b",
+        keep_author=base.keep_author if base else DEFAULT_KEEP_AUTHOR,
+        trailer=base.trailer if base else DEFAULT_TRAILER,
+        squash=base.squash if base else DEFAULT_SQUASH,
     )
     return profile, config
 
@@ -278,8 +287,14 @@ class Context:
     def __init__(self, args: argparse.Namespace) -> None:
         self.profile, self.config = resolve_profile(args)
         logbook.info("направление: %s", self.profile.describe_short())
-        self.target = Git(self.profile.target, dry_run=args.dry_run, verbose=args.verbose)
-        self.source = Git(self.profile.source, dry_run=args.dry_run, verbose=args.verbose)
+        # Без конфига (разовый прогон) действует дефолт самой обёртки.
+        timeout = self.config.git_timeout if self.config else DEFAULT_GIT_TIMEOUT
+        self.target = Git(
+            self.profile.target, dry_run=args.dry_run, verbose=args.verbose, timeout=timeout
+        )
+        self.source = Git(
+            self.profile.source, dry_run=args.dry_run, verbose=args.verbose, timeout=timeout
+        )
         self.state = State.load(self.profile.target)
         self.args = args
 
@@ -512,14 +527,26 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _options(args: argparse.Namespace) -> Options:
+def _options(args: argparse.Namespace, profile: Profile) -> Options:
+    """Опции серии: конфиг профиля, поверх него — флаги этого вызова."""
+    keep_author = args.keep_author
+    squash = profile.squash if args.squash is None else args.squash
+    message = (args.message or "").strip()
+    if message and not squash:
+        raise XferError(
+            "--message задаёт сообщение схлопнутого коммита и без --squash "
+            "ничего не значит: сообщения переносимых коммитов не переписываются"
+        )
     return Options(
-        trailer=not args.no_trailer,
+        trailer=profile.trailer if args.trailer is None else args.trailer,
         empty=args.empty,
         allow_merges=args.allow_merges,
         hooks=args.hooks,
         gpg_sign=args.gpg_sign,
         keep_committer_date=args.keep_committer_date,
+        keep_author=profile.keep_author if keep_author is None else keep_author,
+        squash=squash,
+        message=message,
     )
 
 
@@ -549,7 +576,13 @@ def cmd_apply(args: argparse.Namespace) -> int:
         for row in marked:
             print(f"  {row.status} {row.commit.short} {row.commit.subject} — {row.reason}")
     ordered = print_order(context, [row.commit for row in rows])
-    if not confirm(f"Перенести {len(ordered)} коммит(ов)?", assume_yes=args.yes):
+    options = _options(args, context.profile)
+    question = (
+        f"Перенести {len(ordered)} коммит(ов) ОДНИМ коммитом?"
+        if options.squash and len(ordered) > 1
+        else f"Перенести {len(ordered)} коммит(ов)?"
+    )
+    if not confirm(question, assume_yes=args.yes):
         print("Отменено")
         return EXIT_OK
     print()
@@ -558,7 +591,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         context.profile,
         context.state,
         [commit.sha for commit in ordered],
-        _options(args),
+        options,
         report=print,
     )
     return _summary(outcome)
@@ -570,6 +603,11 @@ def _summary(outcome) -> int:
         f"Перенесено: {outcome.count('ok')}; "
         f"пусто: {outcome.count('empty')}; пропущено: {outcome.count('skipped')}"
     )
+    if outcome.squashed:
+        print(
+            f"Схлопнуто в один коммит: {outcome.squashed[:12]} "
+            f"({outcome.squashed_count} коммит(ов))"
+        )
     if outcome.conflict:
         print(f"Остановлено на {outcome.conflict[:12]}, в очереди ещё {len(outcome.remaining)}")
         print("Дальше: git-xfer continue | skip | abort")
@@ -604,6 +642,37 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Журнал:  {logbook.path() or 'выключен'}")
     policy = context.config.resolve_conflicts if context.config else DEFAULT_RESOLVE
     print(f"Конфликты: {policy} (политика для скилла, не для самой утилиты)")
+    # У начатой серии режим свой: она доигрывается теми опциями, с которыми
+    # начиналась, даже если конфиг тем временем поправили. Показывать здесь
+    # конфиг значило бы соврать ровно там, где за ответом и приходят.
+    started = Options.from_json(progress.opts) if progress else None
+    trailer = started.trailer if started else profile.trailer
+    keep_author = started.keep_author if started else profile.keep_author
+    squash = started.squash if started else profile.squash
+    whose = " (серия начата с ними)" if started else ""
+    print(
+        "Сообщение: "
+        + (
+            "+ трейлер (cherry picked from commit ...)"
+            if trailer
+            else "переносится один в один, трейлера нет"
+        )
+        + whose
+    )
+    print(
+        "Авторство: "
+        + (
+            "автор исходного коммита сохраняется (keep_author)"
+            if keep_author
+            else "автором станет тот, кто переносит"
+        )
+        + whose
+    )
+    print(
+        "Схлопывание: "
+        + ("вся серия в один коммит (squash)" if squash else "коммит в коммит")
+        + whose
+    )
     if not progress:
         print("Незавершённого переноса нет")
         return EXIT_OK
@@ -805,8 +874,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_profile(apply_cmd)
     _add_selection(apply_cmd)
     apply_cmd.add_argument("--yes", action="store_true", help="не спрашивать подтверждения")
-    apply_cmd.add_argument(
-        "--no-trailer", action="store_true", help="без (cherry picked from commit ...)"
+    trailer = apply_cmd.add_mutually_exclusive_group()
+    trailer.add_argument(
+        "--trailer", dest="trailer", action="store_true", default=None,
+        help="дописать (cherry picked from commit ...) — надёжная дедупликация",
+    )
+    trailer.add_argument(
+        "--no-trailer", dest="trailer", action="store_false",
+        help="не трогать сообщение коммита (по умолчанию)",
     )
     apply_cmd.add_argument(
         "--empty", choices=("drop", "keep", "stop"), default="drop",
@@ -816,6 +891,28 @@ def build_parser() -> argparse.ArgumentParser:
     apply_cmd.add_argument("--gpg-sign", action="store_true", help="подписывать коммиты")
     apply_cmd.add_argument(
         "--keep-committer-date", action="store_true", help="сохранить committer date источника"
+    )
+    squash = apply_cmd.add_mutually_exclusive_group()
+    squash.add_argument(
+        "--squash", dest="squash", action="store_true", default=None,
+        help="схлопнуть выбранные коммиты в один",
+    )
+    squash.add_argument(
+        "--no-squash", dest="squash", action="store_false",
+        help="перенести коммит в коммит (по умолчанию)",
+    )
+    apply_cmd.add_argument(
+        "--message", metavar="TEXT",
+        help="сообщение схлопнутого коммита; без него — сообщения серии подряд",
+    )
+    author = apply_cmd.add_mutually_exclusive_group()
+    author.add_argument(
+        "--keep-author", dest="keep_author", action="store_true", default=None,
+        help="оставить автором автора исходного коммита",
+    )
+    author.add_argument(
+        "--reset-author", dest="keep_author", action="store_false",
+        help="автор — тот, кто переносит (по умолчанию)",
     )
     apply_cmd.set_defaults(func=cmd_apply)
 

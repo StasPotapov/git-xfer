@@ -43,7 +43,43 @@ BASE_ENV: dict[str, str] = {
     "PAGER": "cat",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    # Хелпер, спрашивающий пароль в окне или в терминале, ждал бы ответа
+    # вечно. `false` не отвечает ничего и выходит с ошибкой — git идёт
+    # дальше, упирается в GIT_TERMINAL_PROMPT=0 и падает внятно. Команда,
+    # которая печатает хоть что-то (`echo`), тут была бы хуже молчания:
+    # askpass пробуется раньше проверки терминала, и git ушёл бы
+    # аутентифицироваться её выводом.
+    "GIT_ASKPASS": "false",
 }
+
+#: ssh без BatchMode умеет спросить пароль или подтверждение host key и
+#: сесть ждать. Ставим это только поверх пустого места: свой
+#: `GIT_SSH_COMMAND` человек задаёт ради ключа, порта или ProxyCommand,
+#: и затирать его нельзя — от зависшего ssh есть таймаут.
+SSH_BATCH = "ssh -oBatchMode=yes"
+
+#: Потолок на один вызов git, секунды; 0 или None — без ограничения.
+#: Значение из конфига кладёт сюда `cli`, до того действует дефолт.
+DEFAULT_TIMEOUT = 600
+
+
+def _left(deadline: float | None) -> float | None:
+    """Сколько осталось от общего бюджета; None — бюджета нет."""
+    if deadline is None:
+        return None
+    return max(0.1, deadline - time.monotonic())
+
+
+class GitTimeout(XferError):
+    """git не уложился в отведённое время.
+
+    Почти всегда это не «медленно», а «ждёт ввода»: редактор, пейджер,
+    запрос пароля или ssh, спрашивающий про host key. У вызывающего
+    терминала может не быть вовсе (агент), и без потолка такой git держал бы
+    утилиту вечно.
+    """
+
+    exit_code = EXIT_GIT
 
 
 class GitError(XferError):
@@ -84,10 +120,19 @@ class GitResult:
 class Git:
     """Обёртка над git для одного репозитория."""
 
-    def __init__(self, repo: Path | str, *, dry_run: bool = False, verbose: bool = False) -> None:
+    def __init__(
+        self,
+        repo: Path | str,
+        *,
+        dry_run: bool = False,
+        verbose: bool = False,
+        timeout: int | None = DEFAULT_TIMEOUT,
+    ) -> None:
         self.repo = Path(repo)
         self.dry_run = dry_run
         self.verbose = verbose
+        #: 0 и None значат одно и то же — ждать сколько понадобится.
+        self.timeout = timeout or None
 
     # -- сборка команды -------------------------------------------------
 
@@ -101,6 +146,7 @@ class Git:
     def _env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         env = dict(os.environ)
         env.update(BASE_ENV)
+        env.setdefault("GIT_SSH_COMMAND", SSH_BATCH)
         if extra:
             env.update(extra)
         return env
@@ -129,16 +175,20 @@ class Git:
             return GitResult(tuple(args), 0, "", "")
         self._trace(argv)
         started = time.monotonic()
-        proc = subprocess.run(
-            argv,
-            shell=False,
-            input=stdin,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=self._env(env),
-        )
+        try:
+            proc = subprocess.run(
+                argv,
+                shell=False,
+                input=stdin,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=self._env(env),
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise self._timed_out(argv, exc.timeout) from None
         result = GitResult(tuple(args), proc.returncode, proc.stdout, proc.stderr)
         spent = time.monotonic() - started
         logbook.debug(
@@ -155,6 +205,16 @@ class Git:
         if check and not result.ok:
             raise GitError(result)
         return result
+
+    def _timed_out(self, argv: Sequence[str], limit: float | None) -> GitTimeout:
+        cmd = " ".join(shlex.quote(a) for a in argv)
+        logbook.error("git не уложился в %s с: %s", limit, cmd)
+        return GitTimeout(
+            f"git не ответил за {limit:g} с и был прерван:\n  {cmd}\n"
+            "Обычно это значит, что он ждёт ввода (редактор, пейджер, пароль). "
+            "Потолок меняется ключом git_timeout в [defaults] конфига "
+            "(0 — без ограничения)."
+        )
 
     def out(self, *args: str, **kwargs) -> str:
         """stdout без хвостовых переводов строки."""
@@ -225,9 +285,24 @@ class Git:
 
             writer = threading.Thread(target=_feed, daemon=True)
             writer.start()
-            out_bytes, last_err = procs[-1].communicate()
-            for proc in procs[:-1]:
-                proc.wait()
+            # Потолок один на всю цепочку, а не на каждую стадию: иначе
+            # пайплайн из двух команд мог бы законно висеть вдвое дольше.
+            deadline = time.monotonic() + self.timeout if self.timeout else None
+            try:
+                out_bytes, last_err = procs[-1].communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                # Стадии убьёт finally; здесь только говорим, что случилось.
+                raise self._timed_out(self._argv(stages[-1], config), self.timeout) from None
+            for index, proc in enumerate(procs[:-1]):
+                # Последняя стадия уже дочитала пайп, так что остальные либо
+                # кончились, либо кончатся сейчас же. «Либо» тут не фигура
+                # речи: зависнуть может и не последняя стадия.
+                try:
+                    proc.wait(timeout=_left(deadline))
+                except subprocess.TimeoutExpired:
+                    raise self._timed_out(
+                        self._argv(stages[index], config), self.timeout
+                    ) from None
         finally:
             if writer is not None:
                 writer.join(timeout=5)
