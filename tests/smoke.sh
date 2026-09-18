@@ -735,6 +735,21 @@ doc "--reset-author" "$ROOT/README.md" "README описывает флаги а�
 doc "git_timeout" "$ROOT/README.md" "README описывает git_timeout"
 doc "keep_author" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает про keep_author"
 doc "squash" "$ROOT/config.example.toml" "пример конфига описывает squash"
+# По имени ключа не видно, что делает true, а что false, — значит это должно
+# быть написано у каждого ключа прямым текстом, а не выводиться из названия.
+for KEY in trailer keep_author squash; do
+  if awk -v key="$KEY" '
+      $0 ~ "^" key " = " {found=1}
+      /^#/ {buf = buf $0 "\n"; next}
+      {if (found && buf ~ /false —/ && buf ~ /true  —/) ok=1; buf=""; found=0}
+      END {exit ok ? 0 : 1}
+    ' "$ROOT/config.example.toml"; then
+    ok "у ключа $KEY расшифрованы оба значения"
+  else
+    bad "у ключа $KEY расшифрованы оба значения"
+  fi
+done
+doc "| \`false\` — по умолчанию |" "$ROOT/README.md" "в README есть таблица значений ключей"
 doc "--squash" "$ROOT/README.md" "README описывает squash"
 # Скилл обязан СПРАШИВАТЬ про схлопывание, а не решать сам: обещание
 # «одним коммитом или по одному» должно быть прописано словами.
