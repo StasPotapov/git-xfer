@@ -154,11 +154,27 @@ def _check_head(git: Git, profile: Profile, report: Report) -> None:
         report.add("HEAD", FAIL, "detached HEAD — переключитесь на ветку")
         return
     if branch != profile.target_branch:
-        report.add(
-            "ветка",
-            FAIL,
-            f"сейчас {branch!r}, а профиль ожидает {profile.target_branch!r}",
-        )
+        # «Не выгружена» и «такой ветки нет вовсе» лечатся по-разному:
+        # в первом случае достаточно переключиться, во втором ветку сперва
+        # надо создать — и это решение человека, а не опечатка в вызове.
+        wanted = profile.target_branch
+        exists = git.run(
+            "rev-parse", "--verify", "--quiet", f"refs/heads/{wanted}", check=False
+        ).text
+        if exists:
+            report.add(
+                "ветка",
+                FAIL,
+                f"сейчас {branch!r}, а нужна {wanted!r} — переключитесь: "
+                f"git -C {git.repo} switch {wanted}",
+            )
+        else:
+            report.add(
+                "ветка",
+                FAIL,
+                f"ветки {wanted!r} в этом репозитории нет (сейчас {branch!r}); "
+                f"создать от текущей: git -C {git.repo} switch -c {wanted}",
+            )
         return
     report.add("ветка", OK, branch)
 

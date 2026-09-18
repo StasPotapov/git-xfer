@@ -739,6 +739,17 @@ doc "--squash" "$ROOT/README.md" "README описывает squash"
 # Скилл обязан СПРАШИВАТЬ про схлопывание, а не решать сам: обещание
 # «одним коммитом или по одному» должно быть прописано словами.
 doc "одним или по одному" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про схлопывание"
+# Ветка из конфига — заготовка, а не согласие: скилл обязан спрашивать,
+# куда коммитить, и знать флаг, которым это передаётся.
+doc "Ветка цели — спроси" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про ветку цели"
+doc "--target-branch <ветка>" "$ROOT/skills/git-xfer/SKILL.md" "и знает, каким флагом её передать"
+doc "Что выяснить до переноса" "$ROOT/skills/git-xfer/SKILL.md" "у скилла есть сводное интервью"
+# Совпадение ветки в конфиге и в рабочем дереве — не повод промолчать:
+# именно этот соблазн и приводит к коммиту не в ту ветку.
+doc "спрашивай **каждый раз**" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает ветку каждый раз, а не при расхождении"
+doc "как в источнике" "$ROOT/skills/git-xfer/SKILL.md" "среди вариантов есть ветка как у источника"
+doc "switch -c" "$ROOT/skills/git-xfer/SKILL.md" "скилл умеет предложить создать ветку"
+doc "cleanup --all" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает, что ссылки варианта убираются --all"
 # Скилл обязан прямым текстом запрещать интерактивные вызовы: именно на них
 # агент без терминала встаёт намертво.
 doc "Никогда не запускай" "$ROOT/skills/git-xfer/SKILL.md" "скилл запрещает интерактив списком"
@@ -820,7 +831,7 @@ check 0 "$(git -C "$WORK/b" log -1 --format=%B | grep -c 'cherry picked from com
 OUT=$(xfer apply -p t --to b --sha "$BETA" --yes --keep-author --reset-author 2>&1); CODE=$?
 check 1 $CODE "--keep-author вместе с --reset-author отвергнуты"
 
-echo "== 44. squash: серия схлопывается в один коммит =="
+echo "== 43. squash: серия схлопывается в один коммит =="
 src_commit "src/gamma.py" "def gamma(): return 3" "feat: gamma" "2024-05-03T09:00:00+00:00"
 src_commit "src/delta.py" "def delta(): return 4" "feat: delta" "2024-05-04T09:00:00+00:00"
 src_commit "src/eps.py" "def eps(): return 5" "feat: eps" "2024-05-05T09:00:00+00:00"
@@ -844,7 +855,7 @@ check "Bob Target" "$(git -C "$WORK/b" log -1 --format='%an')" "автор сх�
 OUT=$(xfer list -p t --to b)
 check 3 "$(printf '%s\n' "$OUT" | grep -c '− .*feat: \(gamma\|delta\|eps\)' || true)" "все три помечены как перенесённые"
 
-echo "== 45. squash: своё сообщение, конфиг, конфликт =="
+echo "== 44. squash: своё сообщение, конфиг, конфликт =="
 git -C "$WORK/b" reset -q --hard "$BEFORE"
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 xfer apply -p t --to b --sha "$GAMMA" "$DELTA" --yes --squash --message "feat: гамма и дельта разом" >/dev/null 2>&1
@@ -891,7 +902,7 @@ check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE2"..HEAD)" "и схлопн
 has "RESOLVED-SQUASH" "$(cat "$WORK/b/src/app.py")" "разрешение конфликта уехало в итоговый коммит"
 check "" "$(git -C "$WORK/b" status --porcelain=v2)" "после схлопывания дерево чистое"
 
-echo "== 46. падение после созданного коммита оставляет годный state =="
+echo "== 45. падение после созданного коммита оставляет годный state =="
 # Коммит уже создан, а следующий за ним шаг (amend авторства) упал: state
 # обязан знать, что шаг состоялся, иначе continue упрётся в уехавший HEAD,
 # а повторный apply продублирует коммит.
@@ -943,7 +954,7 @@ OUT=$(xfer continue -p t --to b 2>&1); CODE=$?
 check 0 $CODE "continue закрывает серию, а не требует разбираться руками"
 check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE3"..HEAD)" "и ничего не продублировал"
 
-echo "== 47. squash: вырожденные случаи и откат =="
+echo "== 46. squash: вырожденные случаи и откат =="
 git -C "$WORK/b" reset -q --hard "$BEFORE3"
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 src_commit "src/theta.py" "def theta(): return 8" "feat: theta" "2024-05-08T09:00:00+00:00"
@@ -989,7 +1000,7 @@ check "" "$(git -C "$WORK/b" status --porcelain=v2)" "и дерево не ос�
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 git -C "$WORK/b" reset -q --hard "$BEFORE4"
 
-echo "== 48. серия из прошлой версии доигрывается своими правилами =="
+echo "== 47. серия из прошлой версии доигрывается своими правилами =="
 # В state, записанном до появления ключей, их нет — и такая серия обязана
 # доиграться прежним поведением (трейлер + автор оригинала), а не новым.
 git -C "$WORK/b" reset -q --hard "$BEFORE4"
@@ -1027,7 +1038,7 @@ has "cherry picked from commit" "$(git -C "$WORK/b" log -1 --format=%B)" "ком
 check "Ann Source" "$(git -C "$WORK/b" log -1 --format='%an')" "и автора оригинала, как и начиналось"
 check "Ann Source" "$(git -C "$WORK/b" log -2 --format='%an' | tail -1)" "конфликтный тоже сохранил автора оригинала"
 
-echo "== 49. обратное направление без трейлера =="
+echo "== 48. обратное направление без трейлера =="
 # Маппинг в state заведён на целевой репозиторий и в обратную сторону
 # не читается — скилл и README обязаны обещать именно это.
 xfer cleanup -p t --to b --state >/dev/null 2>&1
@@ -1040,7 +1051,69 @@ OUT=$(xfer list -p t --to a 2>&1)
 hasnt "− .*feat: zeta" "$OUT" "а в обратную — не помечен: маппинг односторонний"
 doc "маппинг в state заведён на целевой репозиторий" "$ROOT/skills/git-xfer/SKILL.md" "скилл честно про обратное направление"
 
-echo "== 43. новые ключи конфига проверяются =="
+echo "== 49. status показывает, в какую ветку на самом деле ляжет =="
+xfer cleanup -p t --to b --state >/dev/null 2>&1
+OUT=$(xfer status -p t --to b 2>&1)
+has "Ветка цели: master (выгружена)" "$OUT" "ветка профиля выгружена — так и сказано"
+git -C "$WORK/b" switch -q -c side-work
+OUT=$(xfer status -p t --to b 2>&1)
+has "в профиле master" "$OUT" "видно, что записано в профиле"
+has "сейчас выгружена side-work" "$OUT" "и что выгружено на самом деле"
+has "\-\-target-branch side-work" "$OUT" "и подсказано, как перенести именно туда"
+# Перенос в невыгруженную ветку — предполётная ошибка, а не тихий промах.
+OUT=$(xfer doctor -p t --to b 2>&1); CODE=$?
+check 2 $CODE "doctor не пускает перенос в невыгруженную ветку профиля"
+# А с явной веткой — зелено, и коммит ложится именно в неё.
+xfer doctor -p t --to b --target-branch side-work >/dev/null 2>&1
+check 0 $? "с --target-branch выгруженной ветки doctor зелёный"
+SIDE_BEFORE=$(git -C "$WORK/b" rev-parse side-work)
+MASTER_BEFORE=$(git -C "$WORK/b" rev-parse master)
+xfer sync -p t --to b --target-branch side-work >/dev/null
+xfer apply -p t --to b --target-branch side-work --sha "$ETA" --yes >/dev/null 2>&1
+check 0 $? "перенос в выбранную ветку прошёл"
+check 1 "$(git -C "$WORK/b" rev-list --count "$SIDE_BEFORE"..side-work)" "коммит лёг в выбранную ветку"
+check "$MASTER_BEFORE" "$(git -C "$WORK/b" rev-parse master)" "master не тронут"
+# Ссылки варианта живут под своим alias, поэтому за собой убираем --all:
+# иначе они всплывут предупреждением в следующем doctor.
+xfer cleanup -p t --to b --target-branch side-work --state >/dev/null 2>&1
+git -C "$WORK/b" switch -q master
+git -C "$WORK/b" branch -q -D side-work
+xfer cleanup -p t --to b --all --state >/dev/null 2>&1
+
+echo "== 50. ветки нет вовсе — это отдельный разговор =="
+# Опечатка в имени ветки и желание завести новую выглядят одинаково,
+# поэтому doctor обязан говорить, чего именно не хватает.
+OUT=$(xfer doctor -p t --to b --target-branch нет-такой-ветки 2>&1); CODE=$?
+check 2 $CODE "перенос в несуществующую ветку не начнётся"
+has "в этом репозитории нет" "$OUT" "и сказано, что ветки нет вовсе"
+has "switch -c" "$OUT" "и показано, как её создать"
+git -C "$WORK/b" branch -q other-work
+OUT=$(xfer doctor -p t --to b --target-branch other-work 2>&1); CODE=$?
+check 2 $CODE "перенос в невыгруженную ветку тоже не начнётся"
+has "переключитесь" "$OUT" "но сказано уже другое — что надо переключиться"
+hasnt "в этом репозитории нет" "$OUT" "и про «нет такой ветки» речи не идёт"
+git -C "$WORK/b" branch -q -D other-work
+
+echo "== 51. разовые ветки не путаются между собой =="
+# Имя разового направления обязано различать и целевую ветку: иначе серия,
+# начатая в одну ветку, молча доиграется в другую.
+python3 - "$ROOT" <<'NAME_PY' && ok "два --target-branch дают разные имена направления" || bad "два --target-branch дают разные имена направления"
+import sys
+sys.path.insert(0, sys.argv[1])
+from gitxfer.config import adhoc_profile
+
+def name(dst):
+    # Ровно то, что собирает resolve_profile для `-p t --to b --target-branch <dst>`.
+    variant = "master" if dst == "master" else f"master→{dst}"
+    return adhoc_profile(
+        name=f"t-to-b@{variant}", source="/a", source_branch="master",
+        target="/b", target_branch=dst,
+    ).alias
+
+sys.exit(0 if name("side-work") != name("release/2.0") else 1)
+NAME_PY
+
+echo "== 52. новые ключи конфига проверяются =="
 bad_key() { # файл строка-ключа
   printf '[defaults]\n%s\n[profiles.x]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
     "$2" "$WORK/a" "$WORK/b" > "$1"

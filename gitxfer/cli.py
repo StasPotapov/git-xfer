@@ -247,8 +247,12 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         or src_prefix != base.source_prefix
         or dst_prefix != base.target_prefix
     )
+    # В имя идут обе ветки: с одним лишь источником `--target-branch side`
+    # и `--target-branch release` дали бы одно имя, и защита «серия начата
+    # под другим именем» промолчала бы, доиграв очередь в чужую ветку.
+    variant = src_branch if src_branch == dst_branch else f"{src_branch}→{dst_branch}"
     profile = adhoc_profile(
-        name=base_name if not changed else f"{base_name}@{src_branch}",
+        name=base_name if not changed else f"{base_name}@{variant}",
         source=Path(source),
         source_branch=src_branch,
         target=Path(target),
@@ -270,6 +274,20 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
 def _side_line(path: Path, branch: str, prefix: str) -> str:
     where = f"{path} ({branch})"
     return f"{where}, подкаталог {prefix}/" if prefix else where
+
+
+def _checked_out(git: Git) -> str | None:
+    """Выгруженная ветка, `"detached HEAD"` или None, если git не ответил.
+
+    Три состояния, а не два: битый путь в профиле выглядел бы как detached
+    HEAD, и человек пошёл бы переключать ветку вместо того, чтобы поправить
+    путь.
+    """
+    result = git.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+    if result.text:
+        return result.text
+    # Код 1 без вывода — HEAD не на ветке; всё прочее — git не смог ответить.
+    return "detached HEAD" if result.returncode == 1 else None
 
 
 def describe(profile: Profile) -> str:
@@ -638,6 +656,26 @@ def cmd_status(args: argparse.Namespace) -> int:
     progress = context.state.in_progress
     print(f"Профиль: {profile.name}")
     print(describe(profile))
+    # Ветка цели — первое, что нужно решить перед переносом, и чаще всего
+    # выгружена не та, что записана в профиле. Печатаем обе: из одного
+    # `status` должно быть видно, куда коммиты лягут на самом деле.
+    checked_out = _checked_out(context.target)
+    if checked_out == profile.target_branch:
+        print(f"Ветка цели: {profile.target_branch} (выгружена)")
+    elif checked_out is None:
+        print(
+            f"Ветка цели: в профиле {profile.target_branch}, "
+            f"а что выгружено — прочитать не вышло. Подробности: git-xfer doctor"
+        )
+    else:
+        # Именно «остановится», а не «перенесёт куда попало»: расхождение
+        # ветки — это FAIL предполётной проверки, и apply не начнётся.
+        print(
+            f"Ветка цели: в профиле {profile.target_branch}, "
+            f"сейчас выгружена {checked_out} — перенос в таком виде "
+            f"остановится (код 2). Переносить в выгруженную: "
+            f"--target-branch {checked_out}"
+        )
     print(f"State:   {state_path(profile.target)}")
     print(f"Журнал:  {logbook.path() or 'выключен'}")
     policy = context.config.resolve_conflicts if context.config else DEFAULT_RESOLVE
