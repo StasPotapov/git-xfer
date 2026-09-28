@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import re
@@ -120,6 +121,20 @@ git_timeout = 600
 log = true
 # log_file = "~/.local/state/git-xfer/git-xfer.log"
 
+# Какие коммиты по умолчанию НЕ переносить — служебные, черновики, чужое.
+# Такой коммит остаётся в списке с пометкой ×, но в выбор `all` не попадает,
+# а названный явно требует подтверждения (без терминала — флага
+# --include-skipped). Правила профиля ([profiles.<имя>.skip]) добавляются
+# к этим, а не заменяют их. Все три ключа необязательны.
+#   subject — регэкспы по заголовку коммита (re.search); (?i) — без учёта регистра
+#   commits — хеши коммитов источника, можно сокращённые
+#   paths   — маски путей относительно корня проекта; коммит исключается,
+#             только если под них подходят ВСЕ его файлы. * проходит и через /
+# [defaults.skip]
+# subject = ["(?i)служебн", "^wip\\\\b"]
+# commits = ["a1b2c3d"]
+# paths = ["*.lock", ".idea/*"]
+
 [agent]
 # Насколько самостоятельно агент (скилл git-xfer для Claude Code) разбирает
 # конфликты. Читает это скилл; сама утилита по ней ничего не делает, только
@@ -140,6 +155,7 @@ resolve_conflicts = "mechanical"
 #
 # trailer, keep_author, squash, scan_limit, dedup_window и patchid_window можно
 # переопределить внутри профиля.
+# Свои правила skip — в [profiles.myproj.skip]: они добавляются к общим.
 #
 # [profiles.myproj-release]  # та же пара, другие ветки
 # a = "/path/to/repo-a"
@@ -200,6 +216,96 @@ def _at(prefix: str) -> str:
 
 
 @dataclass(frozen=True)
+class SkipRules:
+    """Какие коммиты по умолчанию не переносить.
+
+    Правило не прячет коммит: он остаётся в списке с пометкой ×, но в выбор
+    `all` не попадает, а явный выбор требует подтверждения. Так служебный
+    коммит нельзя перенести случайно, но можно — осознанно.
+    """
+
+    #: Регэкспы, `re.search` по заголовку коммита.
+    subject: tuple[re.Pattern[str], ...] = ()
+    #: Хеши коммитов источника, можно сокращённые; в нижнем регистре.
+    commits: tuple[str, ...] = ()
+    #: glob по путям относительно корня проекта (префикс стороны срезан):
+    #: коммит исключён, если под них подходят ВСЕ его файлы. `*` проходит `/`.
+    paths: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.subject or self.commits or self.paths)
+
+    def merged(self, other: "SkipRules") -> "SkipRules":
+        """Правила профиля добавляются к общим, а не заменяют их."""
+        return SkipRules(
+            subject=self.subject + other.subject,
+            commits=self.commits + other.commits,
+            paths=self.paths + other.paths,
+        )
+
+    def reason(self, sha: str, subject: str, files: list[str] | None = None) -> str:
+        """Почему коммит исключён; пустая строка — не исключён.
+
+        `files` — пути коммита относительно корня проекта; None — не считали
+        (правил по путям нет), пустой список — коммит без файлов.
+        """
+        sha = sha.lower()
+        for prefix in self.commits:
+            if sha.startswith(prefix):
+                return f"хеш в skip.commits ({prefix})"
+        for pattern in self.subject:
+            if pattern.search(subject):
+                return f"заголовок: {pattern.pattern}"
+        if self.paths and files:
+            if all(any(fnmatch.fnmatchcase(path, glob) for glob in self.paths) for path in files):
+                return "только файлы из skip.paths"
+        return ""
+
+
+def _parse_skip(table: object, where: str) -> SkipRules:
+    """Подтаблица `skip`. Ошибки — словами и сразу, при чтении конфига."""
+    if table is None:
+        return SkipRules()
+    # «[defaults]» → «[defaults.skip]»: так секцию и ищут глазами в файле.
+    where = f"{where[:-1]}.skip]" if where.endswith("]") else f"{where}.skip"
+    if not isinstance(table, dict):
+        raise ConfigError(f"{where}: должна быть таблицей")
+    unknown = sorted(set(table) - {"subject", "commits", "paths"})
+    if unknown:
+        # Опечатка в ключе молча выключила бы правило — ровно то, от чего
+        # правило и заводили.
+        raise ConfigError(
+            f"{where}: неизвестные ключи {', '.join(unknown)}; "
+            "бывают subject, commits, paths"
+        )
+
+    def strings(key: str) -> list[str]:
+        """Как написано: в регэкспе пробел по краям — часть шаблона."""
+        value = table.get(key, [])
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            raise ConfigError(f"{where}: {key!r} должен быть списком непустых строк")
+        return list(value)
+
+    subject: list[re.Pattern[str]] = []
+    for raw in strings("subject"):
+        try:
+            subject.append(re.compile(raw))
+        except re.error as exc:
+            raise ConfigError(f"{where}: регэксп {raw!r} не разбирается — {exc}") from None
+    commits: list[str] = []
+    for raw in (item.strip() for item in strings("commits")):
+        if not re.fullmatch(r"[0-9a-fA-F]{4,64}", raw):
+            raise ConfigError(f"{where}: {raw!r} в 'commits' — не хеш коммита")
+        commits.append(raw.lower())
+    paths = [raw.strip().lstrip("/") for raw in strings("paths")]
+    return SkipRules(subject=tuple(subject), commits=tuple(commits), paths=tuple(paths))
+
+
+@dataclass(frozen=True)
 class Side:
     """Одна сторона пары."""
 
@@ -238,6 +344,8 @@ class Profile:
     trailer: bool = DEFAULT_TRAILER
     #: Схлопывать ли всю серию в один коммит.
     squash: bool = DEFAULT_SQUASH
+    #: Какие коммиты по умолчанию не переносить.
+    skip: SkipRules = SkipRules()
 
     @property
     def alias(self) -> str:
@@ -299,6 +407,7 @@ class Pair:
     keep_author: bool = DEFAULT_KEEP_AUTHOR
     trailer: bool = DEFAULT_TRAILER
     squash: bool = DEFAULT_SQUASH
+    skip: SkipRules = SkipRules()
     #: Для старого формата source/target направление задано самими ключами,
     #: и спрашивать о нём нечего. У пары a/b его выбирают при вызове.
     implied: str | None = None
@@ -328,6 +437,7 @@ class Pair:
             keep_author=self.keep_author,
             trailer=self.trailer,
             squash=self.squash,
+            skip=self.skip,
         )
 
 
@@ -341,6 +451,8 @@ class Config:
     resolve_conflicts: str = DEFAULT_RESOLVE
     #: Потолок на один вызов git, секунды; 0 — без ограничения.
     git_timeout: int = DEFAULT_GIT_TIMEOUT
+    #: Общие правила из [defaults.skip] — для разовых направлений мимо профилей.
+    skip: SkipRules = SkipRules()
 
     def pair(self, name: str | None) -> Pair:
         if not name:
@@ -405,6 +517,7 @@ def adhoc_profile(
     keep_author: bool = DEFAULT_KEEP_AUTHOR,
     trailer: bool = DEFAULT_TRAILER,
     squash: bool = DEFAULT_SQUASH,
+    skip: SkipRules = SkipRules(),
 ) -> Profile:
     """Направление, собранное из флагов или ответов, а не из конфига."""
     return Profile(
@@ -423,6 +536,7 @@ def adhoc_profile(
         keep_author=keep_author,
         trailer=trailer,
         squash=squash,
+        skip=skip,
     )
 
 
@@ -460,6 +574,7 @@ def _parse_pair(
     keep_author: bool,
     trailer: bool,
     squash: bool,
+    skip: SkipRules,
 ) -> "Pair":
     """Разобрать профиль. Понимает и старый формат source/target."""
     new_style = "a" in table or "b" in table
@@ -518,6 +633,7 @@ def _parse_pair(
         keep_author=_require_bool(table, "keep_author", where, keep_author),
         trailer=_require_bool(table, "trailer", where, trailer),
         squash=_require_bool(table, "squash", where, squash),
+        skip=skip.merged(_parse_skip(table.get("skip"), where)),
     )
 
 
@@ -564,6 +680,7 @@ def load_config(path: Path | None = None) -> Config:
     trailer = _require_bool(defaults, "trailer", "[defaults]", DEFAULT_TRAILER)
     squash = _require_bool(defaults, "squash", "[defaults]", DEFAULT_SQUASH)
     git_timeout = _require_timeout(defaults, "git_timeout", "[defaults]", DEFAULT_GIT_TIMEOUT)
+    skip = _parse_skip(defaults.get("skip"), "[defaults]")
 
     raw_profiles = data.get("profiles") or {}
     if not isinstance(raw_profiles, dict):
@@ -584,6 +701,7 @@ def load_config(path: Path | None = None) -> Config:
             keep_author=keep_author,
             trailer=trailer,
             squash=squash,
+            skip=skip,
         )
     if not profiles:
         raise ConfigError(f"{path}: не описан ни один профиль [profiles.<имя>]")
@@ -594,6 +712,7 @@ def load_config(path: Path | None = None) -> Config:
         log_file=log_file,
         resolve_conflicts=resolve,
         git_timeout=git_timeout,
+        skip=skip,
     )
 
 

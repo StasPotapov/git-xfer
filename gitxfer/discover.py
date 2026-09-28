@@ -24,6 +24,8 @@ SIMILAR = "≈"
 TRANSFERRED = "−"
 #: Коммит задел и подкаталог, и файлы вне него: приедет только часть.
 PARTIAL = "*"
+#: Коммит подпадает под правило `skip` из конфига: по умолчанию не переносим.
+SKIPPED = "×"
 
 STATUS_HINT = {
     NEW: "новый",
@@ -31,6 +33,7 @@ STATUS_HINT = {
     TRANSFERRED: "уже перенесён",
 }
 PARTIAL_HINT = "задевает файлы вне подкаталога — приедет только часть"
+SKIPPED_HINT = "не переносим по правилам skip"
 
 LOG_FORMAT = US.join(["%H", "%h", "%ad", "%an", "%s"]) + RS
 
@@ -57,10 +60,16 @@ class Row:
     reason: str = ""
     #: Коммит выходит за подкаталог: перенесётся только часть внутри него.
     partial: bool = False
+    #: Почему коммит подпал под правило `skip`; пусто — не подпал.
+    skipped: str = ""
 
     @property
     def mark(self) -> str:
-        return f"{self.status}{PARTIAL}" if self.partial else self.status
+        return (
+            self.status
+            + (PARTIAL if self.partial else "")
+            + (SKIPPED if self.skipped else "")
+        )
 
 
 @dataclass
@@ -202,6 +211,55 @@ class ShaSet:
         return found[0] if len(found) == 1 else None
 
 
+@dataclass(frozen=True)
+class FileStat:
+    path: str
+    #: None — бинарный файл: строк git не считает.
+    added: int | None
+    deleted: int | None
+
+
+def commit_files(git: Git, shas: list[str], prefix: str = "") -> dict[str, list[FileStat]]:
+    """Файлы каждого коммита с числом строк — одним вызовом на всё окно.
+
+    Пути — относительно корня проекта: `--relative` срезает префикс и
+    заодно отбрасывает всё вне подкаталога, то есть ровно то, что при
+    переносе и не приедет. `--no-renames` — чтобы путь был один, а не
+    `старый => новый`. `-m --first-parent` — иначе merge-коммит (при
+    `--allow-merges`) не печатает ни одного файла, как и в `touches_outside`.
+    """
+    if not shas:
+        return {}
+    args = [
+        "log", "--stdin", "--no-walk=unsorted", "--root", "--no-renames",
+        "-m", "--first-parent", "--numstat", f"--format={RS}%H",
+    ]
+    if prefix:
+        # Со слешем: `--relative` сравнивает строки, и без него `src`
+        # захватил бы соседний `src2/`, обрезав ему путь до `2/...`.
+        args.append(f"--relative={prefix}/")
+    raw = git.out(*args, stdin="\n".join(shas) + "\n")
+    result: dict[str, list[FileStat]] = {sha: [] for sha in shas}
+    for record in raw.split(RS):
+        lines = record.strip("\n").split("\n")
+        if not lines or not lines[0]:
+            continue
+        files = result.setdefault(lines[0].strip(), [])
+        for line in lines[1:]:
+            parts = line.split("\t", 2)
+            if len(parts) != 3:
+                continue
+            added, deleted, path = parts
+            files.append(
+                FileStat(
+                    path=path,
+                    added=int(added) if added.isdigit() else None,
+                    deleted=int(deleted) if deleted.isdigit() else None,
+                )
+            )
+    return result
+
+
 # -- patch-id -------------------------------------------------------------
 
 
@@ -273,6 +331,9 @@ def survey(
     patchid_window: int | None = None,
     allow_merges: bool = False,
     use_patch_id: bool = True,
+    source_ref: str | None = None,
+    target_ref: str | None = None,
+    mapping: dict[str, str] | None = None,
 ) -> Survey:
     """Собрать таблицу коммитов источника с пометками +/≈/−.
 
@@ -280,26 +341,33 @@ def survey(
     маппинг): читается быстро, и от него зависит, на сколько своих коммитов
     назад мы помним, что уже переносили. `patchid_window` — эвристика `≈`:
     считается дольше, поэтому окно меньше, а результат кэшируется.
+
+    `source_ref`, `target_ref` и `mapping` нужны обратному проходу
+    `compare`: он смотрит на ту же пару из целевого репозитория, где
+    источник — выгруженная ветка, а цель — `refs/xfer/...`. По умолчанию —
+    обычное направление профиля и маппинг из state.
     """
+    source_ref = source_ref or profile.ref
+    target_ref = target_ref or profile.target_branch
     limit = limit or profile.scan_limit
     dedup_window = dedup_window or profile.dedup_window
     patchid_window = patchid_window or profile.patchid_window
     src_prefix = profile.source_prefix
     dst_prefix = profile.target_prefix
     commits = read_log(
-        git, profile.ref, limit, allow_merges=allow_merges, prefix=src_prefix
+        git, source_ref, limit, allow_merges=allow_merges, prefix=src_prefix
     )
 
     # Хеши целевой ветки в окне — по ним и сверяемся. Подкаталог цели тут
     # не сужаем: трейлер ищем по всей её истории, иначе коммит, приехавший
     # до появления подкаталога, перестал бы считаться перенесённым.
     target_shas = ShaSet(
-        set(git.lines("rev-list", "-n", str(dedup_window), profile.target_branch, "--"))
+        set(git.lines("rev-list", "-n", str(dedup_window), target_ref, "--"))
     )
     # Канал 1: целевая история сама говорит, откуда её коммиты списаны.
     picked_here: set[str] = set()
     picked_short: list[str] = []
-    for refs in trailer_map(git, profile.target_branch, dedup_window).values():
+    for refs in trailer_map(git, target_ref, dedup_window).values():
         for sha in refs:
             if len(sha) >= 40:
                 picked_here.add(sha)
@@ -307,24 +375,30 @@ def survey(
                 picked_short.append(sha)
     # Канал 2: коммит источника сам помечен как перенесённый из коммита,
     # который уже лежит в цели, — так выглядит обратное направление.
-    source_trailers = trailer_map(git, profile.ref, limit, src_prefix)
+    source_trailers = trailer_map(git, source_ref, limit, src_prefix)
     # Канал 3: локальный маппинг. Проверяем именно достижимость из целевой
     # ветки: после reset/rebase/amend объект живёт в репозитории ещё долго,
     # и `cat-file` нашёл бы висячий коммит, которого в истории уже нет.
-    mapped = {src: dst for src, dst in state.mapping.items()}
+    mapped = dict(state.mapping if mapping is None else mapping)
 
     target_pids: dict[str, str] = {}
     source_pids: dict[str, str] = {}
     if use_patch_id:
         target_pids = patch_ids(
-            git, state, profile.target_branch, patchid_window, prefix=dst_prefix
+            git, state, target_ref, patchid_window, prefix=dst_prefix
         )
         # Со стороны источника patch-id нужны только для показанных строк.
-        source_pids = patch_ids(git, state, profile.ref, limit, prefix=src_prefix)
+        source_pids = patch_ids(git, state, source_ref, limit, prefix=src_prefix)
     hot = {pid_key(sha, dst_prefix) for sha in target_pids} | {
         pid_key(sha, src_prefix) for sha in source_pids
     }
     known_pids = {pid: sha for sha, pid in target_pids.items()}
+    # Файлы коммитов нужны только правилу по путям — без него не читаем.
+    files = (
+        commit_files(git, [commit.sha for commit in commits], src_prefix)
+        if profile.skip.paths
+        else {}
+    )
 
     rows: list[Row] = []
     for number, commit in enumerate(commits, start=1):
@@ -351,12 +425,17 @@ def survey(
                 status=status,
                 reason=reason,
                 partial=touches_outside(git, commit.sha, src_prefix),
+                skipped=profile.skip.reason(
+                    commit.sha,
+                    commit.subject,
+                    [item.path for item in files[commit.sha]] if files else None,
+                ),
             )
         )
 
     return Survey(
         rows=rows,
-        source_ref=profile.ref,
+        source_ref=source_ref,
         scanned_target=len(target_pids),
         hot_shas=hot,
     )

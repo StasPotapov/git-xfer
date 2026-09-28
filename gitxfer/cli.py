@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from .config import (
     DEFAULT_PATCHID_WINDOW,
     DEFAULT_SCAN_LIMIT,
     Profile,
+    SkipRules,
     adhoc_profile,
     config_path,
     load_config,
@@ -34,6 +36,7 @@ from .config import (
     normalize_prefix,
     write_template,
 )
+from .compare import Comparison, compare
 from .discover import (
     NEW,
     US,
@@ -44,6 +47,7 @@ from .discover import (
     Row,
     Survey,
     apply_order,
+    commit_files,
     has_ref,
     survey,
     sync,
@@ -61,7 +65,15 @@ from .gitcmd import Git
 from .plan import dry_run
 from .prefix import touches_outside
 from .preflight import head_sha, run_preflight, stale_xfer_refs
-from .picker import choose, legend, parse_selection, render_rows, require_tty
+from .picker import (
+    ALL_TOKENS,
+    choose,
+    legend,
+    parse_selection,
+    render_rows,
+    require_tty,
+    selection_tokens,
+)
 from .state import State, state_path
 from .transfer import Options, abort, projector_for, resume, start
 
@@ -267,6 +279,9 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         keep_author=base.keep_author if base else DEFAULT_KEEP_AUTHOR,
         trailer=base.trailer if base else DEFAULT_TRAILER,
         squash=base.squash if base else DEFAULT_SQUASH,
+        # Разовое направление правил профиля не знает, но общие из
+        # [defaults.skip] действуют и на него, если конфиг есть.
+        skip=base.skip if base else (config.skip if config else SkipRules()),
     )
     return profile, config
 
@@ -349,7 +364,69 @@ class Context:
 
 
 def resolve_rows(context: Context, view: Survey) -> list[Row]:
-    """Из аргументов или интерактива — набор строк таблицы."""
+    """Из аргументов или интерактива — набор строк таблицы.
+
+    Коммиты под правилами `skip` сюда просто так не проходят (см. `_vet_skipped`).
+    """
+    return _vet_skipped(context, _selected_rows(context, view))
+
+
+def _bulk_selection(args: argparse.Namespace) -> bool:
+    """Выбор «всё подряд» (`all`, `all !5`), а не названные номера.
+
+    Только в этом случае служебный коммит выпадает молча: «все» — это про
+    обычные коммиты, а номер, названный явно, — уже намерение. `--sha`
+    главнее `--commits` (см. `_selected_rows`), и с ним выбор всегда явный.
+    """
+    spec = getattr(args, "commits", None)
+    if not spec or getattr(args, "sha", None):
+        return False
+    tokens = [token.lower() for token in selection_tokens(spec)]
+    return any(token in ALL_TOKENS for token in tokens) and all(
+        token in ALL_TOKENS or token.startswith("!") for token in tokens
+    )
+
+
+def _vet_skipped(context: Context, rows: list[Row]) -> list[Row]:
+    """Служебные коммиты по умолчанию не переносим.
+
+    `all` — выпадают с одной строкой пояснения. Названы явно — в терминале
+    переспрашиваем, без терминала отказываем: агент должен сначала спросить
+    человека и только потом прийти с `--include-skipped`.
+    """
+    args = context.args
+    marked = [row for row in rows if row.skipped]
+    if not marked or getattr(args, "include_skipped", False):
+        return rows
+    kept = [row for row in rows if not row.skipped]
+    listing = [
+        f"  {row.mark} {row.commit.short} {row.commit.subject} — {row.skipped}"
+        for row in marked
+    ]
+    logbook.info(
+        "под правилами skip: %s", ", ".join(row.commit.short for row in marked)
+    )
+    if _bulk_selection(args):
+        print("Не берём — под правилами skip из конфига:")
+        print("\n".join(listing))
+        print("  (взять и их: назовите номера явно и добавьте --include-skipped)")
+        return kept
+    if sys.stdin.isatty():
+        print("Среди выбранных — коммиты под правилами skip из конфига:")
+        print("\n".join(listing))
+        if confirm("Точно переносить и их?", assume_yes=False):
+            return rows
+        print("Их не берём")
+        return kept
+    raise XferError(
+        "среди выбранных — коммиты под правилами skip из конфига:\n"
+        + "\n".join(listing)
+        + "\nПереносить их по умолчанию не положено. Если это осознанно — "
+        "добавьте --include-skipped"
+    )
+
+
+def _selected_rows(context: Context, view: Survey) -> list[Row]:
     args = context.args
     if getattr(args, "sha", None):
         return rows_by_sha(context, view, args.sha)
@@ -401,6 +478,17 @@ def rows_by_sha(context: Context, view: Survey, shas: list[str]) -> list[Row]:
                 author=sanitize(author),
                 subject=sanitize(subject),
             )
+            skip = context.profile.skip
+            files = (
+                [
+                    item.path
+                    for item in commit_files(
+                        context.target, [full], context.profile.source_prefix
+                    ).get(full, [])
+                ]
+                if skip.paths
+                else None
+            )
             row = Row(
                 number=0,
                 commit=commit,
@@ -411,6 +499,7 @@ def rows_by_sha(context: Context, view: Survey, shas: list[str]) -> list[Row]:
                     else "вне окна --limit"
                 ),
                 partial=partial and not outside,
+                skipped=skip.reason(full, commit.subject, files),
             )
         result.append(row)
     return result
@@ -495,15 +584,127 @@ def cmd_list(args: argparse.Namespace) -> int:
     context.ensure_ref()
     view = context.survey(limit=args.limit, use_patch_id=not args.no_patch_id)
     rows = view.rows
+    hidden = 0
     if args.new:
-        rows = [row for row in rows if row.status == NEW]
+        # «Что осталось перенести»: служебные сюда не входят по определению.
+        hidden = sum(1 for row in rows if row.status == NEW and row.skipped)
+        rows = [row for row in rows if row.status == NEW and not row.skipped]
     if not rows:
         print("Коммитов не найдено")
+        if hidden:
+            print(f"  скрыто по правилам skip: {hidden} (без --new видно всё)")
         return EXIT_OK
     for line in render_rows(rows):
         print(line)
     print()
     print(f"  {legend(view.rows)}")
+    if hidden:
+        print(f"  скрыто по правилам skip: {hidden} (без --new видно всё)")
+    return EXIT_OK
+
+
+def _print_notes(comparison: Comparison) -> None:
+    """Подсказки под таблицей «нет в цели» — то, чего не видно в строке."""
+    notes = []
+    for row in comparison.missing:
+        detail = comparison.details[row.commit.sha]
+        if detail.in_sync:
+            notes.append(f"{row.number}: его файлы уже совпадают по обе стороны")
+        if detail.overlaps:
+            notes.append(
+                f"{row.number}: те же файлы правили только в цели — "
+                + ", ".join(detail.overlaps)
+            )
+        if detail.after_last_transferred is False:
+            notes.append(f"{row.number}: старше последнего перенесённого")
+    for note in notes:
+        print(f"  {note}")
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    context = Context(args)
+    context.ensure_ref()
+    result = compare(
+        context.target,
+        context.profile,
+        context.state,
+        limit=args.limit,
+        use_patch_id=not args.no_patch_id,
+        allow_merges=args.allow_merges,
+    )
+    context.state.trim_patchid_cache(result.forward.hot_shas)
+    context.state.save()
+    if args.json:
+        print(json.dumps(result.to_json(), ensure_ascii=False, indent=1))
+        return EXIT_OK
+
+    profile = context.profile
+    for warning in result.warnings:
+        eprint(f"  ! {warning}")
+    print(describe(profile))
+    print(f"Смотрим по {result.limit} последних коммитов каждой стороны (--limit)")
+    print()
+    files = result.files
+    if files.paths:
+        print(
+            f"Файлы проекта сейчас: отличаются {len(files.differ)}, "
+            f"только в источнике {len(files.source_only)}, "
+            f"только в цели {len(files.target_only)}"
+        )
+        if args.files:
+            for title, paths in (
+                ("отличаются", files.differ),
+                ("только в источнике", files.source_only),
+                ("только в цели", files.target_only),
+            ):
+                if paths:
+                    print(f"  {title}:")
+                    for path in paths:
+                        print(f"    {path}")
+        else:
+            print("  (список — --files)")
+    else:
+        print("Файлы проекта сейчас совпадают")
+
+    print()
+    missing = result.missing
+    if missing:
+        print(f"Нет в цели: {len(missing)}  (номера — как у list, годятся в --commits)")
+        for line in render_rows(missing):
+            print(line)
+        _print_notes(result)
+    else:
+        print("Нет в цели: ничего")
+    if result.skipped:
+        print()
+        print(f"Не переносим по правилам skip: {len(result.skipped)}")
+        for line in render_rows(result.skipped):
+            print(line)
+        for row in result.skipped:
+            print(f"  {row.number}: {row.skipped}")
+
+    print()
+    target_only = result.target_only
+    if target_only:
+        similar = sum(1 for row in target_only if row.status == SIMILAR)
+        title = f"Есть только в цели: {len(target_only) - similar}"
+        if similar:
+            title += f", и ещё {similar} ≈ — похоже, есть и в источнике"
+        print(title)
+        # Номера — окна цели: те же, что у list в обратную сторону.
+        print(f"  (номера — как у list --to {profile.source_key})")
+        for line in render_rows(target_only):
+            print(line)
+    else:
+        print("Есть только в цели: ничего")
+
+    print()
+    print(f"Уже перенесено из окна источника: {result.transferred}")
+    print(f"  {legend(result.forward.rows)}")
+    if len(result.forward.rows) >= result.limit:
+        print(
+            f"  старше {result.limit} коммитов не смотрели — --limit {result.limit * 2}"
+        )
     return EXIT_OK
 
 
@@ -815,6 +1016,10 @@ def _add_selection(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--allow-merges", action="store_true", help="показывать и переносить merge-коммиты"
     )
+    parser.add_argument(
+        "--include-skipped", action="store_true",
+        help="брать и коммиты под правилами skip из конфига",
+    )
 
 
 class Parser(argparse.ArgumentParser):
@@ -902,6 +1107,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-merges", action="store_true", help="показывать и merge-коммиты"
     )
     list_cmd.set_defaults(func=cmd_list)
+
+    compare_cmd = subparsers.add_parser(
+        "compare", help="чего нет в цели и что есть только в ней", parents=[common]
+    )
+    _add_profile(compare_cmd)
+    compare_cmd.add_argument("--limit", type=int, help="сколько коммитов смотреть с каждой стороны")
+    compare_cmd.add_argument("--json", action="store_true", help="вывод для агента и скриптов")
+    compare_cmd.add_argument("--files", action="store_true", help="перечислить различающиеся файлы")
+    compare_cmd.add_argument("--no-patch-id", action="store_true", help="не считать patch-id")
+    compare_cmd.add_argument(
+        "--allow-merges", action="store_true", help="показывать и merge-коммиты"
+    )
+    compare_cmd.set_defaults(func=cmd_compare)
 
     plan_cmd = subparsers.add_parser("plan", help="сухой прогон: где будут конфликты", parents=[common])
     _add_profile(plan_cmd)

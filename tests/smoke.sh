@@ -445,7 +445,7 @@ OUT=$(cd "$WORK" && PYTHONPATH="$ROOT/gitxfer:$ROOT" python3 -m gitxfer --versio
 check 0 $CODE "пакет работает, даже если его каталог попал в sys.path"
 
 echo "== 27. все подкоманды отвечают на --help =="
-for CMD in init doctor sync list plan apply continue skip abort status cleanup; do
+for CMD in init doctor sync list compare plan apply continue skip abort status cleanup; do
   OUT=$(PYTHONPATH="$ROOT" python3 -m gitxfer "$CMD" --help 2>&1); CODE=$?
   if [ $CODE -eq 0 ] && printf '%s\n' "$OUT" | grep -q "usage: git-xfer $CMD"; then
     ok "$CMD --help"
@@ -1156,6 +1156,140 @@ except GitTimeout:
     sys.exit(0)
 sys.exit(1)
 TIMEOUT_PY
+
+# --- правила skip и compare: свой свежий стенд -------------------------
+# Основной стенд к этому моменту исхожен переносами вдоль и поперёк;
+# здесь нужны предсказуемые списки, поэтому стенд отдельный.
+SK="$WORK/sk"
+mkdir -p "$SK"
+sh "$HERE/fixture.sh" "$SK" >/dev/null || bad "второй стенд не собрался"
+SKC="$SK/config.toml"
+cat > "$SKC" <<EOF
+[defaults]
+scan_limit = 50
+
+[defaults.skip]
+subject = ["(?i)служебн"]
+
+[profiles.s]
+a = "$SK/a"
+b = "$SK/b"
+branch = "master"
+
+[profiles.s.skip]
+paths = ["*.lock"]
+
+[profiles.p]
+a = "$SK/m"
+a_prefix = "apps/mobile"
+b = "$SK/n"
+branch = "master"
+EOF
+commit_in() { # репозиторий файл заголовок
+  echo "$2" > "$1/$2"
+  git -C "$1" add -A && git -C "$1" -c user.name=Ann -c user.email=a@x commit -qm "$3"
+}
+commit_in "$SK/a" deps.lock "обновил лок"
+commit_in "$SK/a" notes.txt "Служебный: заметки"
+commit_in "$SK/b" target-only.txt "правка только в цели"
+SERVICE=$(git -C "$SK/a" rev-parse HEAD)
+LOCK=$(git -C "$SK/a" rev-parse HEAD~1)
+sx() { xfer --config "$SKC" "$@"; }
+
+echo "== 53. правила skip =="
+OUT=$(sx list -p s --to b 2>&1)
+has "+× .* Служебный: заметки" "$OUT" "служебный по заголовку помечен ×"
+has "+× .* обновил лок" "$OUT" "коммит только из *.lock помечен ×"
+has "не переносим по правилам skip: 2" "$OUT" "в легенде счётчик ×"
+OUT=$(sx list -p s --to b --new 2>&1)
+hasnt "Служебный" "$OUT" "list --new служебные прячет"
+has "скрыто по правилам skip: 2" "$OUT" "и говорит, сколько спрятал"
+OUT=$(sx plan -p s --to b --commits 'all' </dev/null 2>&1); CODE=$?
+check 0 $CODE "plan --commits all проходит"
+has "Не берём — под правилами skip" "$OUT" "all пропускает служебные и говорит об этом"
+hasnt "[0-9]\. $(git -C "$SK/a" rev-parse --short=7 "$SERVICE")" "$OUT" \
+  "служебного нет в порядке применения"
+OUT=$(sx plan -p s --to b --commits 1 </dev/null 2>&1); CODE=$?
+check 1 $CODE "служебный номером без терминала — отказ"
+has "include-skipped" "$OUT" "и подсказка, как взять осознанно"
+sx plan -p s --to b --sha "$LOCK" </dev/null >/dev/null 2>&1
+check 1 $? "служебный по --sha — тоже отказ"
+sx plan -p s --to b --sha "$LOCK" --commits all </dev/null >/dev/null 2>&1
+check 1 $? "--sha главнее all: названный хеш не выпадает молча"
+OUT=$(xfer --config "$SKC" list --source "$SK/a" --target "$SK/b" -b master 2>&1)
+has "+× .* Служебный: заметки" "$OUT" "общие правила действуют и на разовое направление"
+python3 - "$ROOT" "$SK/rel" <<'REL_PY' && ok "файлы коммита не цепляют соседний каталог с тем же началом" || bad "файлы коммита не цепляют соседний каталог с тем же началом"
+import os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+from gitxfer.discover import commit_files
+from gitxfer.gitcmd import Git
+repo = sys.argv[2]
+for path in ("src/a.txt", "src2/b.txt"):
+    os.makedirs(os.path.dirname(os.path.join(repo, path)), exist_ok=True)
+    open(os.path.join(repo, path), "w").write(path)
+run = lambda *a: subprocess.run(["git", "-C", repo, *a], check=True, capture_output=True)
+run("init", "-q")
+run("add", "-A")
+run("-c", "user.name=T", "-c", "user.email=t@x", "commit", "-qm", "два каталога")
+git = Git(repo)
+sha = git.out("rev-parse", "HEAD")
+assert [item.path for item in commit_files(git, [sha], "src")[sha]] == ["a.txt"]
+REL_PY
+BEFORE=$(git -C "$SK/b" rev-parse HEAD)
+sx apply -p s --to b --commits 1 --include-skipped --yes </dev/null >/dev/null 2>&1
+check 0 $? "с --include-skipped переносится"
+check "Служебный: заметки" "$(git -C "$SK/b" log -1 --format=%s)" "и приехал именно он"
+git -C "$SK/b" reset -q --hard "$BEFORE"
+bad_skip() { # файл, строка правила
+  printf '[defaults.skip]\n%s\n[profiles.x]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
+    "$2" "$SK/a" "$SK/b" > "$1"
+}
+bad_skip "$SK/bad-re.toml" 'subject = ["("]'
+OUT=$(xfer status --config "$SK/bad-re.toml" -p x --to b 2>&1); CODE=$?
+check 1 $CODE "битый регэксп — ошибка конфига"
+has "defaults.skip" "$OUT" "и названа секция"
+bad_skip "$SK/bad-key.toml" 'subjects = ["x"]'
+xfer status --config "$SK/bad-key.toml" -p x --to b >/dev/null 2>&1
+check 1 $? "опечатка в ключе skip не выключает правило молча"
+bad_skip "$SK/bad-sha.toml" 'commits = ["не-хеш"]'
+xfer status --config "$SK/bad-sha.toml" -p x --to b >/dev/null 2>&1
+check 1 $? "не хеш в skip.commits — ошибка"
+# Агент узнаёт отказ по подсказке — она должна совпадать со скиллом.
+sk "--include-skipped" "как взять коммит под правилом skip"
+sk "compare -p" "сравнение репозиториев"
+
+echo "== 54. compare =="
+REFS_A=$(git -C "$SK/a" for-each-ref)
+STATUS_B=$(git -C "$SK/b" status --porcelain=v2)
+OUT=$(sx compare -p s --to b 2>&1); CODE=$?
+check 0 $CODE "compare отработал"
+has "Файлы проекта сейчас: отличаются" "$OUT" "есть сводка по файлам"
+has "Нет в цели:" "$OUT" "есть блок «нет в цели»"
+has "Не переносим по правилам skip: 2" "$OUT" "служебные — отдельным блоком"
+has "Есть только в цели:" "$OUT" "есть обратный блок"
+has "правка только в цели" "$OUT" "и в нём коммит, сделанный только в цели"
+has "файлы уже совпадают" "$OUT" "дубль узнан по файлам"
+check "$REFS_A" "$(git -C "$SK/a" for-each-ref)" "репозиторий-источник не тронут"
+check "$STATUS_B" "$(git -C "$SK/b" status --porcelain=v2)" "рабочее дерево цели не тронуто"
+sx compare -p s --to b --json > "$SK/cmp.json" 2>/dev/null
+python3 - "$SK/cmp.json" "$SERVICE" <<'CMP_PY' && ok "JSON: кандидаты, служебные, только в цели" || bad "JSON: кандидаты, служебные, только в цели"
+import json, sys
+data = json.load(open(sys.argv[1]))
+missing = {row["sha"]: row for row in data["missing"]}
+service = missing[sys.argv[2]]
+assert service["skipped"] and service["mark"] == "+×", service
+assert any(row["in_sync"] for row in data["missing"]), "нет in_sync у дубля"
+assert [row["subject"] for row in data["target_only"]][0] == "правка только в цели"
+assert "target-only.txt" in data["files"]["target_only"]
+assert set(data) >= {"source", "target", "files", "missing", "target_only", "warnings"}
+CMP_PY
+OUT=$(sx compare -p p --to b --files 2>&1); CODE=$?
+check 0 $CODE "compare на паре с подкаталогом"
+hasnt "apps/mobile/" "$(printf '%s\n' "$OUT" | sed -n '/^Файлы/,/^$/p')" \
+  "пути файлов — от корня проекта"
+has "Есть только в цели: [1-9]" "$OUT" "расхождение видно в обе стороны"
+sx compare -p p --to a >/dev/null 2>&1
+check 0 $? "и в обратную сторону"
 
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"

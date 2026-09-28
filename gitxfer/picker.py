@@ -18,12 +18,29 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 
-from .discover import NEW, PARTIAL, PARTIAL_HINT, SIMILAR, STATUS_HINT, TRANSFERRED, Row
+from .discover import (
+    NEW,
+    PARTIAL,
+    PARTIAL_HINT,
+    SIMILAR,
+    SKIPPED,
+    SKIPPED_HINT,
+    STATUS_HINT,
+    TRANSFERRED,
+    Row,
+)
 from .errors import XferError
 
 PAGE_SIZE = 40
 
 _TOKEN_RE = re.compile(r"^(?P<neg>!)?(?P<start>\d+)(?:-(?P<end>\d+))?$")
+#: Как в выборе пишется «всё».
+ALL_TOKENS = ("all", "*", "все")
+
+
+def selection_tokens(spec: str) -> list[str]:
+    """Выбор по словам: `1,3 5-7` → `["1", "3", "5-7"]`."""
+    return [token for token in re.split(r"[\s,]+", spec.strip()) if token]
 
 
 class SelectionError(XferError):
@@ -75,12 +92,12 @@ def parse_selection(spec: str, count: int) -> list[int]:
     spec = spec.strip()
     if not spec:
         raise SelectionError("пустой выбор")
-    tokens = [token for token in re.split(r"[\s,]+", spec) if token]
+    tokens = selection_tokens(spec)
     selected: set[int] = set()
     excluded: set[int] = set()
     for token in tokens:
         low = token.lower()
-        if low in ("all", "*", "все"):
+        if low in ALL_TOKENS:
             selected |= set(range(1, count + 1))
             continue
         match = _TOKEN_RE.match(token)
@@ -117,8 +134,9 @@ class Layout:
 
 def _layout(rows: list[Row], total_width: int) -> Layout:
     number = max(2, len(str(max((row.number for row in rows), default=1))))
-    # Метка бывает двухсимвольной («+*»), и ширину колонки считаем по факту:
-    # с фиксированной единицей вёрстка поехала бы на первой же такой строке.
+    # Метка бывает в несколько символов («+*», «+*×»), и ширину колонки
+    # считаем по факту: с фиксированной единицей вёрстка поехала бы на первой
+    # же такой строке.
     mark = max((display_width(row.mark) for row in rows), default=1)
     short = max((display_width(row.commit.short) for row in rows), default=7)
     date = max((display_width(row.commit.date) for row in rows), default=10)
@@ -160,6 +178,9 @@ def legend(rows: list[Row]) -> str:
     partial = sum(1 for row in rows if row.partial)
     if partial:
         parts.append(f"{PARTIAL} {PARTIAL_HINT}: {partial}")
+    skipped = sum(1 for row in rows if row.skipped)
+    if skipped:
+        parts.append(f"{SKIPPED} {SKIPPED_HINT}: {skipped}")
     return "   ".join(parts)
 
 
