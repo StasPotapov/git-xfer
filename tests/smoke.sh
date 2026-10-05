@@ -1291,6 +1291,49 @@ has "Есть только в цели: [1-9]" "$OUT" "расхождение в
 sx compare -p p --to a >/dev/null 2>&1
 check 0 $? "и в обратную сторону"
 
+echo "== 55. plan от ветки цели; грязное дерево — через stash по метке =="
+# Скилл подтверждает перенос одним вопросом до переключения ветки, поэтому
+# прогноз plan обязан быть про ветку цели, а не про выгруженную. Грязное
+# дерево он прячет в stash с меткой и достаёт именно его.
+ST="$WORK/stash"
+mkdir -p "$ST"
+for side in a b; do
+  git init -q -b master "$ST/$side"
+  printf 'l1\nl2\nl3\n' > "$ST/$side/f.txt"
+  git -C "$ST/$side" add f.txt
+  git -C "$ST/$side" -c user.name=Ann -c user.email=a@x commit -qm init
+done
+sed 's/^l1$/l1 из источника/' "$ST/a/f.txt" > "$ST/f.tmp" && mv "$ST/f.tmp" "$ST/a/f.txt"
+git -C "$ST/a" -c user.name=Ann -c user.email=a@x commit -qam "правка l1"
+git -C "$ST/b" switch -qc side
+sed 's/^l1$/l1 из side/' "$ST/b/f.txt" > "$ST/f.tmp" && mv "$ST/f.tmp" "$ST/b/f.txt"
+git -C "$ST/b" -c user.name=Ann -c user.email=a@x commit -qam "правка l1 в side"
+git -C "$ST/b" switch -q master
+stx() { xfer list --source "$ST/a" --target "$ST/b" "$@" >/dev/null 2>&1; \
+        xfer plan --source "$ST/a" --target "$ST/b" --sha "$(git -C "$ST/a" rev-parse HEAD)" "$@" 2>&1; }
+OUT=$(stx -b master)
+has "Конфликтов не ожидается" "$OUT" "plan на выгруженную ветку — без конфликта"
+OUT=$(stx --source-branch master --target-branch side)
+has "конфликт: f.txt" "$OUT" "plan на невыгруженную ветку считает от неё, а не от HEAD"
+
+sed 's/^l3$/l3 грязная/' "$ST/b/f.txt" > "$ST/f.tmp" && mv "$ST/f.tmp" "$ST/b/f.txt"
+MARK="git-xfer autostash smoke 2026-01-01T00:00:00"
+git -C "$ST/b" stash push -q -m "$MARK"
+REF=$(git -C "$ST/b" stash list --format='%gd %s' | grep -F "$MARK" | cut -d' ' -f1)
+check "stash@{0}" "$REF" "stash находится по метке"
+xfer apply --source "$ST/a" --target "$ST/b" -b master \
+  --sha "$(git -C "$ST/a" rev-parse HEAD)" --yes >/dev/null 2>&1
+check 0 $? "после stash apply проходит"
+git -C "$ST/b" stash pop -q --index "$REF"
+check 0 $? "stash вернулся"
+check "l1 из источника|l2|l3 грязная" "$(paste -sd'|' "$ST/b/f.txt")" \
+  "в дереве и перенос, и незакоммиченная правка"
+check "" "$(git -C "$ST/b" stash list)" "чужого в stash не осталось"
+OUT=$(git -C "$ST/a" stash push -m "$MARK" 2>&1)
+has "No local changes to save" "$OUT" "на чистом дереве stash не создаётся"
+sk "No local changes to save" "чистое дерево — stash не создан"
+sk "git-xfer autostash" "метка автостэша"
+
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
 [ "$FAIL" -eq 0 ]

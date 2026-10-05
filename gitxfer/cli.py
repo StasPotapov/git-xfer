@@ -717,7 +717,13 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print("Ничего не выбрано")
         return EXIT_OK
     ordered = print_order(context, [row.commit for row in rows])
-    head = head_sha(context.target)
+    # Прогноз — от ветки цели, как у list и compare, а не от выгруженной:
+    # иначе план на ветку, на которую ещё предстоит переключиться, считался бы
+    # не про неё.
+    branch = context.profile.target_branch
+    head = context.target.run(
+        "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}", check=False
+    ).text
     if not head:
         raise XferError("в целевой ветке нет коммитов")
     result = dry_run(
