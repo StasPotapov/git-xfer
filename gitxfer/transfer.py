@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
@@ -37,7 +38,7 @@ NO_HOOKS = ("core.hooksPath=/dev/null",)
 #: Как вели себя опции до того, как они стали настраиваемыми. Нужно ровно
 #: для одного случая: серия начата прошлой версией, застряла на конфликте,
 #: а `continue` зовёт уже новая.
-LEGACY_OPTIONS = {"trailer": True, "keep_author": True, "squash": False}
+LEGACY_OPTIONS = {"trailer": True, "keep_author": True, "keep_coauthors": True, "squash": False}
 
 US = "\x1f"  # разделитель полей
 RS = "\x1e"  # разделитель записей
@@ -72,6 +73,10 @@ class Options:
     #: --keep-author / --reset-author; здесь — дефолт продукта, чтобы серия,
     #: начатая ещё до появления ключа, доигралась предсказуемо.
     keep_author: bool = False
+    #: Оставить в сообщении строки `Co-authored-by:`. По умолчанию нет: их
+    #: вырезают тем же amend, которым сбрасывают автора. Значение — из профиля
+    #: (`keep_coauthors`) или из флагов --keep-coauthors / --strip-coauthors.
+    keep_coauthors: bool = False
     #: Схлопнуть всю серию в один коммит. Делается не отдельным механизмом,
     #: а поверх обычного: очередь проигрывается как всегда — с конфликтами,
     #: паузой и `continue` — и только в самом конце получившиеся коммиты
@@ -186,23 +191,67 @@ def _committer_env(git: Git, options: Options, sha: str) -> dict[str, str]:
     return {"GIT_COMMITTER_DATE": git.out("show", "-s", "--format=%cI", sha)}
 
 
-def reset_author(git: Git, options: Options, env: dict[str, str] | None = None) -> str:
-    """Переписать авторство последнего коммита на того, кто переносит.
+#: Трейлер соавтора. Регистр у git и сервисов разный: Co-authored-by,
+#: Co-Authored-By — поэтому без учёта регистра.
+COAUTHOR = re.compile(r"co-authored-by[ \t]*:", re.IGNORECASE)
+#: Строка блока трейлеров: `Ключ: значение` или приписка cherry-pick -x.
+TRAILER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*[ \t]*:|\(cherry picked from commit ")
+
+
+def strip_coauthors(message: str) -> str:
+    """Сообщение без трейлеров `Co-authored-by:`; остальное — байт в байт.
+
+    Вырезаем только из блока трейлеров — последнего абзаца, где каждая
+    строка выглядит как `Ключ: значение` (так их видит и
+    `git interpret-trailers`). Строка про соавтора в теле — цитата, пример
+    формата — остаётся. Сообщение из одного абзаца трейлеров не имеет: это
+    заголовок. Вырезать нечего — возвращается исходная строка как есть.
+    """
+    body = message.rstrip("\n")
+    head, sep, last = body.rpartition("\n\n")
+    if not sep:
+        return message
+    lines = last.split("\n")
+    if not all(TRAILER.match(line) for line in lines if line.strip()):
+        return message
+    kept = [line for line in lines if not COAUTHOR.match(line)]
+    if len(kept) == len(lines):
+        return message
+    if any(line.strip() for line in kept):
+        return head + sep + "\n".join(kept) + "\n"
+    return head.rstrip("\n") + "\n"
+
+
+def own_commit(git: Git, options: Options, env: dict[str, str] | None = None) -> str:
+    """Сделать только что перенесённый коммит своим: автор и сообщение.
 
     `cherry-pick` своего `--reset-author` не имеет: авторство он всегда берёт
-    из исходного коммита. Поэтому сразу после коммита правим его `--amend`,
-    пока он ещё вершина ветки и никто его не видел. `--allow-empty` нужен
-    из-за `--empty=keep`, `--no-edit` — чтобы не открылся редактор.
-    Возвращает новый HEAD.
+    из исходного коммита, сообщение — тоже как есть. Поэтому сразу после
+    коммита правим его одним `--amend`, пока он ещё вершина ветки и никто
+    его не видел: без `keep_author` — автор тот, кто переносит; без
+    `keep_coauthors` — без строк `Co-authored-by:`. Нечего менять — коммит
+    не трогаем. `--allow-empty` нужен из-за `--empty=keep`. Возвращает HEAD.
     """
-    args = ["commit", "--amend", "--reset-author", "--no-edit", "--allow-empty"]
+    message = None
+    if not options.keep_coauthors:
+        original = git.out("log", "-1", "--encoding=UTF-8", "--format=%B", "HEAD")
+        cleaned = strip_coauthors(original)
+        if cleaned != original:
+            message = cleaned
+    if options.keep_author and message is None:
+        return head_sha(git) or ""
+    args = ["commit", "--amend", "--allow-empty"]
+    if not options.keep_author:
+        args.append("--reset-author")
+    # verbatim: иначе git сам сожмёт пустые строки и тронет то, что мы не трогали.
+    args += ["-F", "-", "--cleanup=verbatim"] if message is not None else ["--no-edit"]
     args.append("--gpg-sign" if options.gpg_sign else "--no-gpg-sign")
     result = git.run(
-        *args, check=False, config=NO_HOOKS, env=env or {}, mutating=True
+        *args, check=False, config=NO_HOOKS, env=env or {}, stdin=message, mutating=True
     )
     if not result.ok:
         raise XferError(
-            "не удалось переписать авторство перенесённого коммита:\n"
+            "не удалось переписать автора или сообщение перенесённого коммита:\n"
             + result.describe()
         )
     return head_sha(git) or ""
@@ -351,10 +400,9 @@ def pick(
     after = head_sha(git) or ""
     if result.ok:
         if after != before:
-            if not options.keep_author:
-                # env тот же: --keep-committer-date должен пережить amend,
-                # иначе committer date стал бы временем переписывания.
-                after = reset_author(git, options, env) or after
+            # env тот же: --keep-committer-date должен пережить amend,
+            # иначе committer date стал бы временем переписывания.
+            after = own_commit(git, options, env) or after
             return OK, result, after
         return EMPTY, result, after
     if git_path(git, "CHERRY_PICK_HEAD").exists():
@@ -653,10 +701,10 @@ def resume(
                 )
             head = head_sha(git) or ""
             status = OK if head != progress.expected_head else EMPTY
-            if status == OK and not options.keep_author:
-                # Коммит разрешённого конфликта делает git, авторство он
-                # тянет из исходного так же, как на обычном шаге.
-                head = reset_author(git, options, _committer_env(git, options, current)) or head
+            if status == OK:
+                # Коммит разрешённого конфликта делает git, авторство и
+                # сообщение он тянет из исходного так же, как на обычном шаге.
+                head = own_commit(git, options, _committer_env(git, options, current)) or head
             _record(state, progress, outcome, current, status, head)
             report(
                 f"  {current[:12]} доведён до коммита"
@@ -670,13 +718,12 @@ def resume(
                 report(f"  {current[:12]} не оставил изменений — пропущен")
             elif _one_commit_ahead(git, progress.expected_head, head):
                 # Человек закоммитил разрешение сам — принимаем как есть.
-                # Авторство всё равно наше дело: git, коммитя разрешённый
-                # конфликт, сохраняет автора оригинала, и без этого шага
-                # один коммит серии молча выбился бы из остальных.
-                if not options.keep_author:
-                    head = reset_author(
-                        git, options, _committer_env(git, options, current)
-                    ) or head
+                # Авторство и сообщение всё равно наше дело: git, коммитя
+                # разрешённый конфликт, сохраняет автора и текст оригинала,
+                # и без этого шага один коммит серии выбился бы из остальных.
+                head = own_commit(
+                    git, options, _committer_env(git, options, current)
+                ) or head
                 _record(state, progress, outcome, current, OK, head, detail="закоммичен вручную")
                 report(f"  {current[:12]} уже закоммичен вручную ({head[:12]})")
             else:

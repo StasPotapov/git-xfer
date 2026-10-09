@@ -34,8 +34,14 @@ DEFAULT_PATCHID_WINDOW = 1000
 #: наоборот — `keep_author = true` в конфиге или `--keep-author` разово.
 DEFAULT_KEEP_AUTHOR = False
 
+#: Оставлять ли в сообщении строки `Co-authored-by:`. По умолчанию нет: по
+#: той же причине, что и с автором, — в целевой истории коммит ваш, и чужие
+#: соавторы из исходного сообщения там лишние. Кому нужно наоборот —
+#: `keep_coauthors = true` в конфиге или `--keep-coauthors` разово.
+DEFAULT_KEEP_COAUTHORS = False
+
 #: Дописывать ли в сообщение `(cherry picked from commit <sha>)`. По
-#: умолчанию нет: сообщение коммита переносится один в один. Цена — самый
+#: умолчанию нет: в сообщение ничего не дописывается. Цена — самый
 #: надёжный канал дедупликации выключен, и «уже переносили» утилита знает
 #: только из своего state (эта машина) и по patch-id (эвристика ≈).
 #: Кому дедупликация важнее чистого сообщения — `trailer = true`.
@@ -84,7 +90,7 @@ dedup_window = 5000
 patchid_window = 1000
 
 # Строка (cherry picked from commit <sha>) в сообщении перенесённого коммита.
-#   false — НЕ дописывать: сообщение едет один в один  ← так по умолчанию
+#   false — НЕ дописывать: никакой приписки в конце  ← так по умолчанию
 #   true  — дописывать: в конце сообщения появится эта строка
 # Что стоит за false: трейлер — самый надёжный канал дедупликации, он лежит
 # в самой целевой истории. Без него о том, что коммит уже переносили, утилита
@@ -108,6 +114,12 @@ squash = false
 # переносит: это поле настройки не имеет.
 # Разово: --keep-author / --reset-author.
 keep_author = false
+
+# Строки «Co-authored-by: …» в сообщении перенесённого коммита.
+#   false — вырезать: соавторы исходного коммита не едут      ← по умолчанию
+#   true  — оставить сообщение как есть
+# Разово: --keep-coauthors / --strip-coauthors.
+keep_coauthors = false
 
 # Потолок на один вызов git, секунды. Страховка от зависания: git, севший
 # ждать ввода (редактор, пейджер, запрос пароля), иначе держит утилиту вечно.
@@ -153,8 +165,8 @@ resolve_conflicts = "mechanical"
 # b = "/path/to/repo-b"
 # branch = "master"        # одна ветка с обеих сторон
 #
-# trailer, keep_author, squash, scan_limit, dedup_window и patchid_window можно
-# переопределить внутри профиля.
+# trailer, keep_author, keep_coauthors, squash, scan_limit, dedup_window
+# и patchid_window можно переопределить внутри профиля.
 # Свои правила skip — в [profiles.myproj.skip]: они добавляются к общим.
 #
 # [profiles.myproj-release]  # та же пара, другие ветки
@@ -340,6 +352,8 @@ class Profile:
     #: Оставлять ли в перенесённом коммите автора исходного. По умолчанию
     #: нет: автором становится тот, кто переносит.
     keep_author: bool = DEFAULT_KEEP_AUTHOR
+    #: Оставлять ли строки `Co-authored-by:`. По умолчанию нет: вырезаются.
+    keep_coauthors: bool = DEFAULT_KEEP_COAUTHORS
     #: Дописывать ли трейлер `(cherry picked from commit ...)`.
     trailer: bool = DEFAULT_TRAILER
     #: Схлопывать ли всю серию в один коммит.
@@ -405,6 +419,7 @@ class Pair:
     dedup_window: int
     patchid_window: int
     keep_author: bool = DEFAULT_KEEP_AUTHOR
+    keep_coauthors: bool = DEFAULT_KEEP_COAUTHORS
     trailer: bool = DEFAULT_TRAILER
     squash: bool = DEFAULT_SQUASH
     skip: SkipRules = SkipRules()
@@ -435,6 +450,7 @@ class Pair:
             source_key=source.key,
             target_key=target.key,
             keep_author=self.keep_author,
+            keep_coauthors=self.keep_coauthors,
             trailer=self.trailer,
             squash=self.squash,
             skip=self.skip,
@@ -515,6 +531,7 @@ def adhoc_profile(
     source_key: str = "a",
     target_key: str = "b",
     keep_author: bool = DEFAULT_KEEP_AUTHOR,
+    keep_coauthors: bool = DEFAULT_KEEP_COAUTHORS,
     trailer: bool = DEFAULT_TRAILER,
     squash: bool = DEFAULT_SQUASH,
     skip: SkipRules = SkipRules(),
@@ -534,6 +551,7 @@ def adhoc_profile(
         source_key=source_key,
         target_key=target_key,
         keep_author=keep_author,
+        keep_coauthors=keep_coauthors,
         trailer=trailer,
         squash=squash,
         skip=skip,
@@ -572,6 +590,7 @@ def _parse_pair(
     dedup: int,
     window: int,
     keep_author: bool,
+    keep_coauthors: bool,
     trailer: bool,
     squash: bool,
     skip: SkipRules,
@@ -631,6 +650,7 @@ def _parse_pair(
         dedup_window=_require_int(table, "dedup_window", where, dedup),
         patchid_window=_require_int(table, "patchid_window", where, window),
         keep_author=_require_bool(table, "keep_author", where, keep_author),
+        keep_coauthors=_require_bool(table, "keep_coauthors", where, keep_coauthors),
         trailer=_require_bool(table, "trailer", where, trailer),
         squash=_require_bool(table, "squash", where, squash),
         skip=skip.merged(_parse_skip(table.get("skip"), where)),
@@ -677,6 +697,9 @@ def load_config(path: Path | None = None) -> Config:
     dedup = _require_int(defaults, "dedup_window", "[defaults]", DEFAULT_DEDUP_WINDOW)
     window = _require_int(defaults, "patchid_window", "[defaults]", DEFAULT_PATCHID_WINDOW)
     keep_author = _require_bool(defaults, "keep_author", "[defaults]", DEFAULT_KEEP_AUTHOR)
+    keep_coauthors = _require_bool(
+        defaults, "keep_coauthors", "[defaults]", DEFAULT_KEEP_COAUTHORS
+    )
     trailer = _require_bool(defaults, "trailer", "[defaults]", DEFAULT_TRAILER)
     squash = _require_bool(defaults, "squash", "[defaults]", DEFAULT_SQUASH)
     git_timeout = _require_timeout(defaults, "git_timeout", "[defaults]", DEFAULT_GIT_TIMEOUT)
@@ -699,6 +722,7 @@ def load_config(path: Path | None = None) -> Config:
             dedup=dedup,
             window=window,
             keep_author=keep_author,
+            keep_coauthors=keep_coauthors,
             trailer=trailer,
             squash=squash,
             skip=skip,

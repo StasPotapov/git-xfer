@@ -23,6 +23,7 @@ from .config import (
     DEFAULT_SQUASH,
     DEFAULT_GIT_TIMEOUT,
     DEFAULT_KEEP_AUTHOR,
+    DEFAULT_KEEP_COAUTHORS,
     DEFAULT_TRAILER,
     DEFAULT_RESOLVE,
     DEFAULT_PATCHID_WINDOW,
@@ -277,6 +278,7 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
         source_key=base.source_key if base else "a",
         target_key=base.target_key if base else "b",
         keep_author=base.keep_author if base else DEFAULT_KEEP_AUTHOR,
+        keep_coauthors=base.keep_coauthors if base else DEFAULT_KEEP_COAUTHORS,
         trailer=base.trailer if base else DEFAULT_TRAILER,
         squash=base.squash if base else DEFAULT_SQUASH,
         # Разовое направление правил профиля не знает, но общие из
@@ -755,6 +757,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def _options(args: argparse.Namespace, profile: Profile) -> Options:
     """Опции серии: конфиг профиля, поверх него — флаги этого вызова."""
     keep_author = args.keep_author
+    keep_coauthors = args.keep_coauthors
     squash = profile.squash if args.squash is None else args.squash
     message = (args.message or "").strip()
     if message and not squash:
@@ -770,6 +773,7 @@ def _options(args: argparse.Namespace, profile: Profile) -> Options:
         gpg_sign=args.gpg_sign,
         keep_committer_date=args.keep_committer_date,
         keep_author=profile.keep_author if keep_author is None else keep_author,
+        keep_coauthors=profile.keep_coauthors if keep_coauthors is None else keep_coauthors,
         squash=squash,
         message=message,
     )
@@ -893,6 +897,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     started = Options.from_json(progress.opts) if progress else None
     trailer = started.trailer if started else profile.trailer
     keep_author = started.keep_author if started else profile.keep_author
+    keep_coauthors = started.keep_coauthors if started else profile.keep_coauthors
     squash = started.squash if started else profile.squash
     whose = " (серия начата с ними)" if started else ""
     print(
@@ -900,7 +905,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         + (
             "+ трейлер (cherry picked from commit ...)"
             if trailer
-            else "переносится один в один, трейлера нет"
+            else "без трейлера"
+        )
+        + (
+            ", строки Co-authored-by остаются (keep_coauthors)"
+            if keep_coauthors
+            else ", строки Co-authored-by вырезаются"
         )
         + whose
     )
@@ -1175,6 +1185,15 @@ def build_parser() -> argparse.ArgumentParser:
     author.add_argument(
         "--reset-author", dest="keep_author", action="store_false",
         help="автор — тот, кто переносит (по умолчанию)",
+    )
+    coauthors = apply_cmd.add_mutually_exclusive_group()
+    coauthors.add_argument(
+        "--keep-coauthors", dest="keep_coauthors", action="store_true", default=None,
+        help="оставить в сообщении строки Co-authored-by",
+    )
+    coauthors.add_argument(
+        "--strip-coauthors", dest="keep_coauthors", action="store_false",
+        help="вырезать строки Co-authored-by (по умолчанию)",
     )
     apply_cmd.set_defaults(func=cmd_apply)
 

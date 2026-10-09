@@ -737,7 +737,7 @@ doc "keep_author" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает про
 doc "squash" "$ROOT/config.example.toml" "пример конфига описывает squash"
 # По имени ключа не видно, что делает true, а что false, — значит это должно
 # быть написано у каждого ключа прямым текстом, а не выводиться из названия.
-for KEY in trailer keep_author squash; do
+for KEY in trailer keep_author keep_coauthors squash; do
   if awk -v key="$KEY" '
       $0 ~ "^" key " = " {found=1}
       /^#/ {buf = buf $0 "\n"; next}
@@ -946,14 +946,14 @@ profile = adhoc_profile(
 )
 git, state = Git(work / "b"), State.load(work / "b")
 calls = {"n": 0}
-real = transfer.reset_author
+real = transfer.own_commit
 def boom(*args, **kwargs):
     calls["n"] += 1
     # Первый коммит доводим честно, на втором падаем ПОСЛЕ cherry-pick.
     if calls["n"] == 2:
         raise XferError("подстроенный сбой на доводке авторства")
     return real(*args, **kwargs)
-transfer.reset_author = boom
+transfer.own_commit = boom
 try:
     transfer.start(git, profile, state, [zeta, eta], transfer.Options())
 except XferError:
@@ -1035,12 +1035,13 @@ for path in (Path(sys.argv[1]) / "state" / "git-xfer").glob("*.json"):
     progress = data.get("in_progress")
     if not progress:
         continue
-    for key in ("trailer", "keep_author", "squash", "message"):
+    for key in ("trailer", "keep_author", "keep_coauthors", "squash", "message"):
         progress["opts"].pop(key, None)
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 STRIP_PY
 OUT=$(xfer status -p t --to b 2>&1)
 has "трейлер" "$OUT" "status показывает опции старой серии, а не новые дефолты"
+has "Co-authored-by остаются" "$OUT" "старая серия соавторов не вырезает — как и начиналась"
 printf 'l1\nl2\nRESOLVED-OLD\nl4\nl5\n' > "$WORK/b/src/app.py"
 git -C "$WORK/b" add src/app.py
 xfer continue -p t --to b >/dev/null 2>&1
@@ -1333,6 +1334,100 @@ OUT=$(git -C "$ST/a" stash push -m "$MARK" 2>&1)
 has "No local changes to save" "$OUT" "на чистом дереве stash не создаётся"
 sk "No local changes to save" "чистое дерево — stash не создан"
 sk "git-xfer autostash" "метка автостэша"
+
+echo "== 56. соавторы: вырезаются по умолчанию, ключ и флаги возвращают =="
+# Перенос делает коммит своим: автор — тот, кто переносит, и чужие
+# Co-authored-by из исходного сообщения туда же не едут. Регистр у трейлера
+# бывает любой; путь через конфликт и continue обязан делать то же самое.
+CA="$WORK/coauthors"
+mkdir -p "$CA"
+for side in a b; do
+  git init -q -b master "$CA/$side"
+  printf 'x1\nx2\nx3\n' > "$CA/$side/g.txt"
+  git -C "$CA/$side" add g.txt
+  git -C "$CA/$side" -c user.name=Ann -c user.email=a@x commit -qm init
+done
+ca_commit() { # строка-замена сообщение
+  sed "s/^x1.*$/$1/" "$CA/a/g.txt" > "$CA/g.tmp" && mv "$CA/g.tmp" "$CA/a/g.txt"
+  git -C "$CA/a" -c user.name=Ann -c user.email=a@x commit -qam "$2"
+  git -C "$CA/a" rev-parse HEAD
+}
+cax() { # подкоманда флаги…; перед apply — sync: новые коммиты источника видны только после него
+  cmd=$1; shift
+  [ "$cmd" = apply ] && xfer sync --source "$CA/a" --target "$CA/b" -b master >/dev/null 2>&1
+  xfer "$cmd" --source "$CA/a" --target "$CA/b" -b master "$@"
+}
+MSG="$(printf 'feat: один\n\nТело коммита.\n\nCo-authored-by: Bot <bot@example.com>\nCo-Authored-By: Claude <noreply@anthropic.com>')"
+C1=$(ca_commit "x1 первый" "$MSG")
+cax apply --sha "$C1" --yes >/dev/null 2>&1
+check 0 $? "перенос коммита с соавторами прошёл"
+BODY=$(git -C "$CA/b" log -1 --format=%B)
+hasnt "o-authored-by" "$BODY" "строки Co-authored-by вырезаны в любом регистре"
+has "Тело коммита." "$BODY" "остальное сообщение на месте"
+check "feat: один" "$(git -C "$CA/b" log -1 --format=%s)" "заголовок не тронут"
+
+C2=$(ca_commit "x1 второй" "$(printf 'feat: два\n\nCo-authored-by: Bot <bot@example.com>')")
+cax apply --sha "$C2" --yes --keep-coauthors >/dev/null 2>&1
+has "Co-authored-by: Bot" "$(git -C "$CA/b" log -1 --format=%B)" "--keep-coauthors оставил соавтора"
+
+C3=$(ca_commit "x1 третий" "$(printf 'feat: три\n\nCo-authored-by: Bot <bot@example.com>')")
+cax apply --sha "$C3" --yes --keep-author >/dev/null 2>&1
+hasnt "Co-authored-by" "$(git -C "$CA/b" log -1 --format=%B)" "с --keep-author соавтор всё равно вырезан"
+check "Ann" "$(git -C "$CA/b" log -1 --format=%an)" "а автор оригинала остался"
+
+cat > "$WORK/coauthors.toml" <<EOF
+[profiles.ca]
+a = "$CA/a"
+b = "$CA/b"
+branch = "master"
+keep_coauthors = true
+EOF
+OUT=$(xfer status --config "$WORK/coauthors.toml" -p ca --to b 2>&1)
+has "Co-authored-by остаются" "$OUT" "status показывает keep_coauthors из профиля"
+OUT=$(cax status 2>&1)
+has "Co-authored-by вырезаются" "$OUT" "и дефолт — вырезать"
+C4=$(ca_commit "x1 четвёртый" "$(printf 'feat: четыре\n\nCo-authored-by: Bot <bot@example.com>')")
+xfer sync --config "$WORK/coauthors.toml" -p ca --to b >/dev/null 2>&1
+xfer apply --config "$WORK/coauthors.toml" -p ca --to b --sha "$C4" --yes >/dev/null 2>&1
+has "Co-authored-by: Bot" "$(git -C "$CA/b" log -1 --format=%B)" "keep_coauthors из конфига сработал"
+printf 'keep_coauthors = "no"\n' >> "$WORK/coauthors.toml"
+xfer status --config "$WORK/coauthors.toml" -p ca --to b >/dev/null 2>&1
+check 1 $? "keep_coauthors строкой — ошибка конфига"
+
+# Конфликт: цель правит ту же строку, continue доводит коммит без соавтора.
+sed 's/^x1.*$/x1 цель/' "$CA/b/g.txt" > "$CA/g.tmp" && mv "$CA/g.tmp" "$CA/b/g.txt"
+git -C "$CA/b" -c user.name=Bob -c user.email=b@x commit -qam "правка цели"
+C5=$(ca_commit "x1 пятый" "$(printf 'feat: пять\n\nCo-authored-by: Bot <bot@example.com>')")
+cax apply --sha "$C5" --yes >/dev/null 2>&1
+check 3 $? "перенос встал на конфликте"
+printf 'x1 решено\nx2\nx3\n' > "$CA/b/g.txt"
+git -C "$CA/b" add g.txt
+cax continue >/dev/null 2>&1
+check 0 $? "continue довёл коммит"
+check "feat: пять" "$(git -C "$CA/b" log -1 --format=%s)" "это тот самый коммит"
+hasnt "Co-authored-by" "$(git -C "$CA/b" log -1 --format=%B)" "и после конфликта соавтор вырезан"
+# Вырезается только трейлер в последнем абзаце; тело — байт в байт, включая
+# двойные пустые строки и строку-цитату с тем же словом.
+printf 'h\n' > "$CA/a/h.txt" && git -C "$CA/a" add h.txt
+# --cleanup=verbatim: иначе двойную пустую строку сожмёт уже git commit.
+git -C "$CA/a" -c user.name=Ann -c user.email=a@x commit -q --cleanup=verbatim -m "$(printf 'feat: шесть\n\nРаздел один.\n\n\nРаздел два.\n    Co-authored-by: цитата в теле\n\nSigned-off-by: Ann <a@x>\nCo-authored-by: Bot <bot@example.com>')"
+C6=$(git -C "$CA/a" rev-parse HEAD)
+cax apply --sha "$C6" --yes >/dev/null 2>&1
+check 0 $? "перенос коммита с трейлерами прошёл"
+check "$(printf 'feat: шесть
+
+Раздел один.
+
+
+Раздел два.
+    Co-authored-by: цитата в теле
+
+Signed-off-by: Ann <a@x>')" \
+  "$(git -C "$CA/b" log -1 --format=%B)" \
+  "вырезан только трейлер соавтора, тело и Signed-off-by нетронуты"
+doc "keep_coauthors" "$ROOT/config.example.toml" "пример конфига описывает keep_coauthors"
+doc "--strip-coauthors" "$ROOT/README.md" "README описывает флаги соавторов"
+doc "keep_coauthors" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает про keep_coauthors"
 
 echo
 echo "Проверок пройдено: $PASS, провалено: $FAIL"
