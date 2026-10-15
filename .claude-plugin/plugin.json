@@ -1,0 +1,7 @@
+{
+  "name": "git-xfer",
+  "description": "Move commits between two unrelated git repositories: the git-xfer CLI on the agent's PATH and a skill that drives it — dedup, conflict dry run, honest abort.",
+  "author": { "name": "Stas Potapov" },
+  "license": "MIT",
+  "keywords": ["git", "cherry-pick", "commits", "repositories"]
+}

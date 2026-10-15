@@ -1,0 +1,8 @@
+{
+  "name": "git-xfer",
+  "description": "git-xfer: move commits between unrelated git repositories",
+  "owner": { "name": "Stas Potapov" },
+  "plugins": [
+    { "name": "git-xfer", "source": "./", "description": "The git-xfer skill and CLI" }
+  ]
+}
