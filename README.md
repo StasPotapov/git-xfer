@@ -33,14 +33,14 @@
 **Плагином Claude Code** — одной установкой приезжают и скилл, и CLI:
 
 ```
-/plugin marketplace add StasPotapov/git-xfer
-/plugin install git-xfer@git-xfer
+/plugin marketplace add StasPotapov/sp-tools
+/plugin install git-xfer@sp-tools
 ```
 
 Скилл тогда называется `/git-xfer:git-xfer`, а `git-xfer` лежит в `PATH` агента. Нужен
 `python3` 3.11 или новее. В `PATH` вашего терминала плагин утилиту не кладёт: для ручной
-работы поставьте её, как в [«Установке»](#установка). Новая версия: `/plugin marketplace update git-xfer`,
-затем `/plugin update git-xfer@git-xfer`. Плагин и симлинк скилла вместе не ставьте —
+работы поставьте её, как в [«Установке»](#установка). Новая версия: `/plugin marketplace update sp-tools`,
+затем `/plugin update git-xfer@sp-tools`. Плагин и симлинк скилла вместе не ставьте —
 скилл загрузится дважды.
 
 ### Зачем инструмент, если агент и так умеет cherry-pick
