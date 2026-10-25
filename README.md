@@ -1,100 +1,105 @@
 # git-xfer
 
-Перенос коммитов между двумя **несвязанными** git-репозиториями — такими,
-у которых нет общего предка и никогда не было общего remote.
+[Русская версия](README.ru.md).
 
-Типичный случай: один и тот же проект живёт в двух рабочих копиях (разные
-хостинги, разные машины, разные заказчики), истории независимые, но правки
-нужно гонять в обе стороны. Штатные средства тут не помогают: `merge` требует
-общей истории, зеркалирование переносит репозиторий целиком, а голый
-`git cherry-pick` не умеет ни показать, что уже перенесено, ни пережить
-конфликт в середине серии.
+Transfers commits between two **unrelated** git repositories — repositories
+that have no common ancestor and never had a common remote.
 
-## Самый короткий путь — через агента
+The typical case: the same project lives in two working copies (different
+hosts, different machines, different clients). The histories are independent,
+but changes must go both ways. Standard tools do not help here: `merge` needs
+a common history, mirroring transfers the whole repository, and plain
+`git cherry-pick` can neither show what was already transferred nor survive
+a conflict in the middle of a series.
 
-**Первый раз** — дайте агенту ссылку и скажите словами:
+## The shortest path — via an agent
 
-> Поставь инструмент `https://github.com/StasPotapov/git-xfer`, внутри
-> есть скилл — с его помощью перенеси коммит `a1b2c3d` из `~/dev/repo-a`
-> в `~/dev/repo-b`
+**The first time**, give the agent the link and say it in words:
 
-Дальше он всё сделает сам: `skills/git-xfer/SKILL.md` — самодостаточная
-инструкция. По ней агент поставит инструмент, предложит подключить скилл,
-спросит пути и ветки, заведёт конфиг, проверит готовность, покажет, что
-уже переносили и где будут конфликты, и применит после вашего «да».
+> Install the tool `https://github.com/StasPotapov/git-xfer`. It contains
+> a skill — use it to transfer commit `a1b2c3d` from `~/dev/repo-a`
+> to `~/dev/repo-b`
 
-**Дальше** ссылка и установка не нужны — скилл вызывается напрямую.
-В Claude Code это `/git-xfer`, или просто словами: «перенеси вот этот
-коммит в личный репозиторий», и хватает хеша или заголовка.
+The agent does the rest by itself: `skills/git-xfer/SKILL.md` is a
+self-contained instruction. With it, the agent installs the tool, offers to
+connect the skill, asks for the paths and branches, creates the config, checks
+readiness, shows what was already transferred and where conflicts will be,
+and applies after your "yes".
 
-`SKILL.md` — обычный текст, так что это не только про Claude Code: любому
-агенту, умеющему запускать команды в терминале, хватит ссылки на него.
+**After that**, you do not need the link or the installation — you call the
+skill directly. In Claude Code this is `/git-xfer`, or just words: "transfer
+this commit to my personal repository". A hash or a subject is enough.
 
-**Плагином Claude Code** — одной установкой приезжают и скилл, и CLI:
+`SKILL.md` is plain text, so this is not only about Claude Code: a link to it
+is enough for any agent that can run commands in a terminal.
+
+**As a Claude Code plugin** — one installation brings both the skill and the CLI:
 
 ```
 /plugin marketplace add StasPotapov/sp-tools
 /plugin install git-xfer@sp-tools
 ```
 
-Скилл тогда называется `/git-xfer:git-xfer`, а `git-xfer` лежит в `PATH` агента. Нужен
-`python3` 3.11 или новее. В `PATH` вашего терминала плагин утилиту не кладёт: для ручной
-работы поставьте её, как в [«Установке»](#установка). Новая версия: `/plugin marketplace update sp-tools`,
-затем `claude plugin update git-xfer@sp-tools` (в терминале). Плагин и симлинк скилла вместе не ставьте —
-скилл загрузится дважды.
+The skill is then called `/git-xfer:git-xfer`, and `git-xfer` is in the agent's `PATH`. You need
+`python3` 3.11 or newer. The plugin does not put the utility in the `PATH` of your terminal: for manual
+work, install it as described in [Installation](#installation). New version: `/plugin marketplace update sp-tools`,
+then `claude plugin update git-xfer@sp-tools` (in the terminal). Do not install the plugin and the skill symlink together —
+the skill will load twice.
 
-### Зачем инструмент, если агент и так умеет cherry-pick
+### Why a tool, if the agent can already cherry-pick
 
-Агенту с голым `cherry-pick` не на что опереться. Он не помнит, что
-переносил в прошлый раз, — и молча продублирует коммит или пропустит
-нужный. Не отличит конфликт от «коммит стал пустым, потому что это
-изменение уже там». Упрётся в конфликт на третьем коммите из десяти
-и бросит репозиторий в середине операции. Проверять придётся вам — то
-есть ровно то, от чего вы хотели избавиться.
+With plain `cherry-pick`, the agent has nothing to rely on. It does not
+remember what it transferred last time — and it silently duplicates a commit
+or skips a needed one. It cannot tell a conflict from "the commit became
+empty because this change is already there". It hits a conflict on the third
+commit of ten and leaves the repository in the middle of an operation. You
+have to check everything — which is exactly what you wanted to get rid of.
 
-`git-xfer` забирает у агента всё, что можно посчитать: что уже
-перенесено, где будут конфликты, как довести серию после паузы. Агент
-решает, *что* переносить, и разбирает конфликты.
+`git-xfer` takes from the agent everything that can be computed: what was
+already transferred, where conflicts will be, how to finish a series after
+a pause. The agent decides *what* to transfer and resolves conflicts.
 
-## Установка
+## Installation
 
-Нужен Python ≥ 3.11 (ради `tomllib`) и git ≥ 2.45 (ради `cherry-pick --empty`).
-Сторонних зависимостей нет — только стандартная библиотека.
+You need Python ≥ 3.11 (for `tomllib`) and git ≥ 2.45 (for `cherry-pick --empty`).
+`git-xfer doctor` and every `apply` (it runs the same preflight checks) check the git
+version first and fail on an older git with `версия git — X, нужен 2.45+` (git version: X, need 2.45+).
+There are no third-party dependencies — only the standard library.
 
 ```bash
 uv tool install git+https://github.com/StasPotapov/git-xfer
-# или
+# or
 pipx install git+https://github.com/StasPotapov/git-xfer
 ```
 
-Зовите **через дефис** — `git-xfer`. Форма `git xfer` через пробел тоже
-работает, но зависит от того, как git разрешает подкоманды.
+Call it **with a hyphen** — `git-xfer`. The form `git xfer` with a space also
+works, but it depends on how git resolves subcommands.
 
 <details>
-<summary><b>Без установки: клон</b> — симлинк, обёртка под конкретный python или запуск модулем</summary>
+<summary><b>Without installation: a clone</b> — a symlink, a wrapper for a specific python, or running as a module</summary>
 
 ```bash
 git clone https://github.com/StasPotapov/git-xfer.git ~/tools/git-xfer
-python3 --version          # должно быть 3.11 или новее
+python3 --version          # must be 3.11 or newer
 ```
 
-Дальше — любой из трёх способов. Обновление в любом случае одно: `git pull`
-в клоне, переустанавливать нечего.
+Then use any of three ways. The update is the same in every case: `git pull`
+in the clone, nothing to reinstall.
 
-**1. Симлинк в `PATH`**
+**1. A symlink in `PATH`**
 
 ```bash
 mkdir -p ~/.local/bin
 ln -s ~/tools/git-xfer/bin/git-xfer ~/.local/bin/git-xfer
-# если ~/.local/bin ещё не в PATH:
+# if ~/.local/bin is not in PATH yet:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
 ```
 
-Имя файла менять нельзя: `git-xfer` — это и имя команды, и то, по чему
-git находит подкоманду. Алиас шелла вместо симлинка не годится — git
-его не видит.
+Do not change the file name: `git-xfer` is both the command name and the
+name by which git finds the subcommand. A shell alias instead of a symlink
+does not work — git does not see it.
 
-**2. Обёртка вместо симлинка — когда нужен конкретный интерпретатор**
+**2. A wrapper instead of a symlink — when you need a specific interpreter**
 
 ```bash
 cat > ~/.local/bin/git-xfer <<'EOF'
@@ -104,389 +109,389 @@ EOF
 chmod +x ~/.local/bin/git-xfer
 ```
 
-Пригодится там, где первым в `PATH` лежит старый `python3` — на macOS это
-обычно системный 3.9.
+This helps where an old `python3` comes first in `PATH` — on macOS this is
+usually the system 3.9.
 
-**3. Совсем без `PATH` — модулем**
+**3. No `PATH` at all — as a module**
 
 ```bash
 PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p myproj --to b
 ```
 
-В этом варианте ни `git-xfer`, ни `git xfer` работать не будут — только
+In this variant neither `git-xfer` nor `git xfer` works — only
 `python3 -m gitxfer`.
 
 </details>
 
 <details>
-<summary><b>Не работает — что проверить</b></summary>
+<summary><b>It does not work — what to check</b></summary>
 
-**`git: 'xfer' is not a git command`** — утилиты нет в `PATH`. Из просто
-скачанного клона `git xfer` работать не может: git ищет в `PATH`
-исполняемый файл `git-xfer`. Поставьте или положите симлинк. До этого
-зовите из каталога клона: `python3 -m gitxfer …` или `./bin/git-xfer …`.
+**`git: 'xfer' is not a git command`** — the utility is not in `PATH`. From a
+clone that you only downloaded, `git xfer` cannot work: git looks in `PATH`
+for an executable file `git-xfer`. Install it or add a symlink. Until then,
+call it from the clone directory: `python3 -m gitxfer …` or `./bin/git-xfer …`.
 
-**`command -v git-xfer` ничего не печатает** — симлинк создан, но
-`~/.local/bin` не в `PATH`. Проверить: `echo $PATH | tr : '\n' | grep local/bin`.
+**`command -v git-xfer` prints nothing** — the symlink exists, but
+`~/.local/bin` is not in `PATH`. To check: `echo $PATH | tr : '\n' | grep local/bin`.
 
-**`attempted relative import with no known parent package`** — запустили
-файл пакета напрямую (`python3 gitxfer/cli.py`). Так нельзя. Свежие версии
-на это отвечают подсказкой вместо трейсбека.
+**`attempted relative import with no known parent package`** — you ran a
+package file directly (`python3 gitxfer/cli.py`). This is not allowed. Recent
+versions answer this with a hint instead of a traceback.
 
-**`нужен Python 3.11 или новее`** — `python3` в `PATH` слишком старый
-(на macOS системный обычно 3.9). Ставьте через `uv`/`pipx`, они
-фиксируют интерпретатор, либо зовите `python3.11 -m gitxfer …`.
+**`нужен Python 3.11 или новее`** (Python 3.11 or newer is needed) — the `python3`
+in `PATH` is too old (on macOS the system one is usually 3.9). Install through
+`uv`/`pipx`, they pin the interpreter, or call `python3.11 -m gitxfer …`.
 
-**`FileNotFoundError` из `os.getcwd()`** — каталог, в котором стоит
-терминал, переехал или удалён. Достаточно `cd` в существующий каталог.
-Свежие версии этим не падают.
+**`FileNotFoundError` from `os.getcwd()`** — the directory where the terminal
+is located was moved or deleted. A `cd` to an existing directory is enough.
+Recent versions do not fail on this.
 
-**Что-то упало непонятно** — есть журнал: путь покажет `git-xfer status`,
-по умолчанию `~/.local/state/git-xfer/git-xfer.log`. Там каждый вызов git
-с кодом возврата и полный трейсбек последней ошибки.
+**Something failed for an unclear reason** — there is a log: `git-xfer status`
+shows its path, by default `~/.local/state/git-xfer/git-xfer.log`. It contains
+every git call with its exit code and the full traceback of the last error.
 
 </details>
 
-## Конфиг
+## Config
 
-Штатное место — `~/.config/git-xfer/config.toml` (учитывается
-`XDG_CONFIG_HOME`). Утилита его только читает, правится он руками;
-шаблон создаёт `git-xfer init`.
+The standard location is `~/.config/git-xfer/config.toml` (`XDG_CONFIG_HOME`
+is respected). The utility only reads it; you edit it by hand.
+`git-xfer init` creates a template.
 
-**Профиль — это пара репозиториев, а не направление.** Направление
-выбирается в момент вызова флагом `--to`, поэтому на одну пару нужен
-один профиль, а не два.
+**A profile is a pair of repositories, not a direction.** You select the
+direction at call time with the `--to` flag, so one pair needs one profile,
+not two.
 
 ```toml
 [defaults]
-scan_limit = 30         # сколько коммитов источника показывать
-dedup_window = 5000     # как глубоко помним, что уже переносили
-patchid_window = 1000   # окно эвристики ≈
-trailer = false         # не дописывать (cherry picked from commit …)
-keep_author = false     # автор перенесённого коммита — тот, кто переносит
-keep_coauthors = false  # строки Co-authored-by вырезаются
-squash = false          # не схлопывать серию в один коммит
-git_timeout = 600       # потолок на один вызов git, секунды (0 — без него)
-log = true              # журнал прогонов
+scan_limit = 30         # how many source commits to show
+dedup_window = 5000     # how deep we remember what was already transferred
+patchid_window = 1000   # window of the ≈ heuristic
+trailer = false         # do not append (cherry picked from commit …)
+keep_author = false     # the author of the transferred commit is the person who transfers
+keep_coauthors = false  # Co-authored-by lines are removed
+squash = false          # do not squash the series into one commit
+git_timeout = 600       # limit for one git call, seconds (0 — no limit)
+log = true              # run log
 
 [profiles.myproj]
 a = "/path/to/repo-a"
 b = "/path/to/repo-b"
-branch = "master"          # одна ветка с обеих сторон
+branch = "master"          # one branch on both sides
 
-[profiles.myproj-release]  # та же пара, другие ветки
+[profiles.myproj-release]  # the same pair, other branches
 a = "/path/to/repo-a"
 b = "/path/to/repo-b"
-a_branch = "release/1.x"   # если ветки называются по-разному
+a_branch = "release/1.x"   # if the branches have different names
 b_branch = "stable"
 
-[profiles.myapp]           # проект лежит в подкаталоге монорепозитория
+[profiles.myapp]           # the project is in a subdirectory of a monorepo
 a = "/path/to/monorepo"
 a_prefix = "apps/mobile"
-b = "/path/to/personal"    # тут проект в корне — b_prefix не нужен
+b = "/path/to/personal"    # here the project is at the root — b_prefix is not needed
 branch = "master"
 ```
 
-`--to b` тащит из `a` в `b`, `--to a` — обратно. Без флага в терминале
-утилита спросит.
+`--to b` takes from `a` to `b`, `--to a` — back. Without the flag, in a
+terminal, the utility asks.
 
-`trailer`, `keep_author`, `keep_coauthors`, `squash` и окна можно переопределить внутри профиля —
-профиль главнее `[defaults]`, а флаг вызова главнее профиля.
+You can override `trailer`, `keep_author`, `keep_coauthors`, `squash` and the windows inside a profile —
+the profile overrides `[defaults]`, and a call flag overrides the profile.
 
-Четыре ключа решают, как будет выглядеть перенесённый коммит. Все четыре по
-умолчанию `false`. Для первых трёх это значит «коммит ваш, без чужих следов»,
-для `squash` — «сколько выбрали, столько и приедет»:
+Four keys decide how the transferred commit looks. All four are `false`
+by default. For the first three this means "the commit is yours, with no
+traces of others", for `squash` — "you get as many commits as you selected":
 
-| ключ | `false` — по умолчанию | `true` |
+| key | `false` — default | `true` |
 |---|---|---|
-| `trailer` | без приписки `(cherry picked from commit <sha>)` | в конец сообщения дописывается `(cherry picked from commit <sha>)` |
-| `keep_author` | автор — вы, `author date` — момент переноса | автор и его дата остаются от исходного коммита |
-| `keep_coauthors` | строки `Co-authored-by:` вырезаются из сообщения | сообщение остаётся как есть |
-| `squash` | сколько коммитов выбрали, столько и приедет | вся выбранная серия становится одним коммитом |
+| `trailer` | no `(cherry picked from commit <sha>)` note | `(cherry picked from commit <sha>)` is appended to the end of the message |
+| `keep_author` | the author is you, `author date` is the moment of the transfer | the author and their date stay from the original commit |
+| `keep_coauthors` | `Co-authored-by:` lines are removed from the message | the message stays as is |
+| `squash` | you get as many commits as you selected | the whole selected series becomes one commit |
 
-Разовые флаги названы так же и работают в обе стороны: `--trailer` /
+One-time flags have the same names and work both ways: `--trailer` /
 `--no-trailer`, `--keep-author` / `--reset-author`, `--keep-coauthors` /
-`--strip-coauthors`, `--squash` / `--no-squash`. Что действует прямо сейчас —
-три строки в выводе `git-xfer status`.
+`--strip-coauthors`, `--squash` / `--no-squash`. What is in effect right now —
+three lines in the output of `git-xfer status`.
 
-### Что приезжает в целевой репозиторий
+### What arrives in the target repository
 
-По умолчанию коммит переносится так, будто вы написали его сами: **сообщение
-то же**, но без приписок и без строк `Co-authored-by:`, **автор и коммиттер —
-вы**, author date — момент переноса.
+By default a commit is transferred as if you wrote it yourself: **the message
+is the same**, but without notes and without `Co-authored-by:` lines, **the
+author and the committer are you**, the author date is the moment of the transfer.
 
-У коммита в git два поля, и путают их постоянно: **author** — кто написал
-изменение (и `author date`), **committer** — кто применил его в этой истории.
-Обычный `cherry-pick` оставляет author от оригинала, а committer'ом ставит
-вас — отсюда и «в коммите двое». Кто такой «вы» — это `user.name` и
-`user.email` того репозитория, **куда** переносим, на машине, где запущен
-перенос.
+A git commit has two fields, and people mix them up all the time: **author** —
+who wrote the change (and `author date`), **committer** — who applied it in
+this history. A normal `cherry-pick` keeps the author from the original and
+sets you as the committer — hence "two people in the commit". "You" means
+`user.name` and `user.email` of the repository **to which** we transfer, on
+the machine where the transfer runs.
 
 | `keep_author` | author | committer |
 |---|---|---|
-| `false` — по умолчанию | вы, дата — момент переноса | вы |
-| `true` | автор оригинала и его дата | вы |
+| `false` — default | you, date — the moment of the transfer | you |
+| `true` | the original author and their date | you |
 
-Committer отдельной настройки не имеет: в git это всегда тот, кто применил
-коммит, и подменять его значило бы приписывать работу другому человеку.
+The committer has no separate setting: in git it is always the person who
+applied the commit, and to replace it would mean to attribute the work to
+another person.
 
-Всё это включается обратно, вместе или по отдельности:
+You can turn all of this back on, together or separately:
 
 ```toml
 [defaults]
-trailer = true         # + строка (cherry picked from commit <sha>)
-keep_author = true     # автор и author date остаются от оригинала
-keep_coauthors = true  # строки Co-authored-by остаются в сообщении
+trailer = true         # + the line (cherry picked from commit <sha>)
+keep_author = true     # author and author date stay from the original
+keep_coauthors = true  # Co-authored-by lines stay in the message
 ```
 
-Разово, без правки конфига: `--trailer` / `--no-trailer`,
+For one run, without editing the config: `--trailer` / `--no-trailer`,
 `--keep-author` / `--reset-author`, `--keep-coauthors` / `--strip-coauthors`.
-Что действует сейчас, показывает `git-xfer status` строками «Сообщение:»
-и «Авторство:» — а если серия уже
-начата, он показывает её собственные опции: доигрывается она теми, с которыми
-начиналась.
+`git-xfer status` shows what is in effect now in the lines "Сообщение:"
+(Message) and "Авторство:" (Authorship) — and if a series has already
+started, it shows the options of that series: the series finishes with the
+options it started with.
 
-### Несколько коммитов — одним
+### Several commits as one
 
-Сколько коммитов выбрали, столько в цели и появится. Если нужен один общий:
+You get as many commits in the target as you selected. If you need one common commit:
 
 ```bash
 git-xfer apply -p myproj --to b --commits 1-6 --yes \
-  --squash --message "feat: экран профиля"
+  --squash --message "feat: profile screen"
 ```
 
-Без `--message` сообщением станут сообщения серии подряд, от старого
-к новому. Постоянно — `squash = true` в `[defaults]` или в профиле,
-разовое исключение — `--no-squash`.
+Without `--message`, the message is the messages of the series in a row, from
+old to new. Permanently — `squash = true` in `[defaults]` or in the profile;
+a one-time exception — `--no-squash`.
 
-Две комбинации, о которых стоит знать заранее:
+Two combinations that you should know about in advance:
 
-- со включённым `trailer` в собранном сообщении будет по строке
-  `(cherry picked from commit …)` на каждый вошедший коммит — они едут как
-  есть и в одну не схлопываются. Задайте `--message`, если это лишнее;
-- со включённым `keep_author` автором схлопнутого коммита становится автор
-  **первого** коммита серии (и его author date): у одного коммита автор
-  может быть только один.
+- with `trailer` on, the combined message has one
+  `(cherry picked from commit …)` line for each included commit — they go
+  as is and do not merge into one. Give `--message` if you do not need them;
+- with `keep_author` on, the author of the squashed commit is the author of
+  the **first** commit of the series (and its author date): one commit can
+  have only one author.
 
-Схлопывание — не отдельный механизм: серия применяется как обычно, коммит
-за коммитом, и только в самом конце сворачивается (`reset --soft` к точке
-старта плюс один `commit`). Поэтому конфликты, пауза и `continue` работают
-без оговорок, а сворачивается уже разрешённый результат. Одно следствие:
-`abort` посреди squash-серии оставляет уже применённые коммиты по отдельности
-— сворачивать в тот момент ещё нечего.
+Squashing is not a separate mechanism: the series is applied as usual, commit
+by commit, and only at the very end it is folded (`reset --soft` to the start
+point plus one `commit`). So conflicts, the pause and `continue` work without
+exceptions, and what is folded is the already resolved result. One consequence:
+`abort` in the middle of a squash series leaves the already applied commits
+separate — at that moment there is nothing to fold yet.
 
-Цена выключенного трейлера — дедупликация. Это самый надёжный канал: он
-живёт в самой целевой истории и потому работает с любой машины и в обе
-стороны. Без него «уже переносили» утилита помнит только по своему state
-(каталог `~/.local/state/git-xfer`, привязан к целевому репозиторию на этой
-машине) и по patch-id — эвристике, которая метит коммит значком `≈`, но
-не прячет его.
+The cost of the disabled trailer is deduplication. The trailer is the most
+reliable channel: it lives in the target history itself and so it works from
+any machine and in both directions. Without it, the utility remembers "already
+transferred" only by its state (the directory `~/.local/state/git-xfer`, tied
+to the target repository on this machine) and by patch-id — a heuristic that
+marks a commit with `≈` but does not hide it.
 
-Из этого следует и то, чего от state ждать не стоит: он **односторонний**.
-Файл заведён на тот репозиторий, в который переносили, и при смене
-направления не читается — на обратном пути уже перенесённые коммиты будут
-помечены `≈`, а не `−`. Переносите в обе стороны, с двух машин или чистите
-state — включайте `trailer = true`.
+This also tells you what not to expect from the state: it is **one-way**.
+The file belongs to the repository into which you transferred, and it is not
+read when the direction changes — on the way back, already transferred commits
+are marked `≈`, not `−`. If you transfer in both directions, from two machines,
+or clean the state — turn on `trailer = true`.
 
-### Проект в подкаталоге
+### Project in a subdirectory
 
-Бывает, что один и тот же проект в одном репозитории лежит в корне, а во
-втором — в подкаталоге монорепозитория. Тогда пути в коммитах не сходятся:
-`apps/mobile/icons/logo.svg` против просто `icons/logo.svg`, и перенос
-«как есть» создал бы лишнюю вложенность. Подкаталог объявляется ключом
-`<сторона>_prefix`, как `a_prefix` в примере выше.
+Sometimes the same project is at the root in one repository and in a
+subdirectory of a monorepo in the other. Then the paths in commits do not
+match: `apps/mobile/icons/logo.svg` against just `icons/logo.svg`, and a
+transfer "as is" would create extra nesting. You declare the subdirectory
+with the key `<side>_prefix`, like `a_prefix` in the example above.
 
-**Путь стороны — всегда корень репозитория.** Указать в `a` сразу
-подкаталог нельзя: `doctor` это заметит и покажет, как переписать профиль.
-Разово, без конфига, то же делают флаги `--source-prefix` и
-`--target-prefix`.
+**The path of a side is always the repository root.** You cannot put the
+subdirectory directly in `a`: `doctor` notices this and shows how to rewrite
+the profile. For one run, without a config, the flags `--source-prefix` and
+`--target-prefix` do the same.
 
-Дальше всё как обычно, но с тремя следствиями:
+Then everything works as usual, but with three consequences:
 
-- **`--to b` срезает префикс, `--to a` его надевает.**
-- **Коммиты, не задевшие подкаталог, в список не попадают.** Значит
-  `--limit` считает коммиты проекта, а не коммиты монорепозитория —
-  иначе окно из 30 коммитов могло бы не содержать ни одного нужного.
-- **Коммит, задевший и подкаталог, и файлы вне него, переносится
-  частично** — только внутренняя часть. Такая строка помечена в списке
-  звёздочкой (`+ *`), чтобы это не случилось молча.
+- **`--to b` strips the prefix, `--to a` adds it.**
+- **Commits that do not touch the subdirectory are not in the list.** So
+  `--limit` counts the commits of the project, not the commits of the monorepo —
+  otherwise a window of 30 commits could contain no needed commit at all.
+- **A commit that touches both the subdirectory and files outside it is
+  transferred partially** — only the inside part. Such a line is marked in
+  the list with an asterisk (`+ *`), so that this does not happen silently.
 
-Обратный перенос ничего не удаляет за пределами подкаталога: база
-трёхстороннего слияния содержит только поддерево под префиксом, так что
-остальные каталоги монорепозитория для merge выглядят как «добавлено
-нами» и остаются на месте.
+A transfer back deletes nothing outside the subdirectory: the base of the
+three-way merge contains only the subtree under the prefix, so for the merge
+the other directories of the monorepo look like "added by us" and stay in place.
 
-### Какие коммиты не переносить
+### Commits to skip
 
-Служебные коммиты, черновики, правки только под одну сторону — их можно
-описать правилами, и по умолчанию они переноситься не будут:
+Internal commits, drafts, changes for one side only — you can describe them
+with rules, and by default they are not transferred:
 
 ```toml
 [defaults.skip]
-subject = ["(?i)служебн", "^wip\\b"]  # регэкспы по заголовку коммита
-commits = ["a1b2c3d"]                  # конкретные хеши, можно сокращённые
-paths = ["*.lock", ".idea/*"]          # коммит только из таких файлов
+subject = ["(?i)internal", "^wip\\b"]  # regexes on the commit subject
+commits = ["a1b2c3d"]                  # specific hashes, short ones are allowed
+paths = ["*.lock", ".idea/*"]          # a commit made only of such files
 
-[profiles.myproj.skip]                 # у профиля — свои, в дополнение к общим
+[profiles.myproj.skip]                 # a profile has its own, in addition to the common ones
 subject = ["^chore\\(ci\\)"]
 ```
 
-Правило не прячет коммит, а ставит на него пометку `×` с причиной.
-Дальше так:
+A rule does not hide a commit — it marks it with `×` and a reason.
+Then:
 
-- `list --new` и блок «нет в цели» у `compare` показывают его отдельно,
-  среди кандидатов его нет;
-- `--commits all` его пропускает и пишет об этом одной строкой;
-- названный явно (номером, диапазоном, `--sha`, в интерактивном выборе)
-  в терминале вызывает вопрос «точно переносить?», а без терминала —
-  отказ с кодом `1`, пока не добавлен `--include-skipped`.
+- `list --new` and the "not in target" block of `compare` show it separately,
+  it is not among the candidates;
+- `--commits all` skips it and reports this in one line;
+- if you name it explicitly (by number, range, `--sha`, in interactive selection),
+  in a terminal you get the question "transfer anyway?", and without a terminal —
+  a refusal with code `1`, until you add `--include-skipped`.
 
-`paths` считаются от корня проекта — подкаталог стороны уже срезан, так что
-одно правило работает в обе стороны пары. Коммит исключается, только если
-под маски подходят **все** его файлы: в масках `*` проходит и через `/`.
-Опечатка в ключе или битый регэксп — ошибка конфига, а не молча
-выключенное правило.
+`paths` are relative to the project root — the subdirectory of the side is
+already stripped, so one rule works in both directions of the pair. A commit
+is excluded only if **all** its files match the masks: in masks `*` also
+matches `/`. A typo in a key or a broken regex is a config error, not a
+silently disabled rule.
 
 <details>
-<summary><b>Конфиг в своём месте, ветки мимо профиля, работа вообще без конфига</b></summary>
+<summary><b>Config in its own place, branches outside the profile, work with no config at all</b></summary>
 
-Свой путь к конфигу, если не хочется трогать `~/.config`:
+Your own path to the config, if you do not want to touch `~/.config`:
 
 ```bash
 git-xfer init --config ~/tools/git-xfer.local.toml
 git-xfer list --config ~/tools/git-xfer.local.toml -p myproj --to b
 ```
 
-`--config` работает и до подкоманды, и после. Чтобы не писать его каждый
-раз — `alias gx='git-xfer --config ~/tools/git-xfer.local.toml'`. Если
-держите конфиг внутри клона, называйте файл `что-нибудь.local.toml` —
-`.gitignore` такие исключает, и реальные пути не уедут в историю.
+`--config` works both before the subcommand and after it. To not type it each
+time — `alias gx='git-xfer --config ~/tools/git-xfer.local.toml'`. If you
+keep the config inside the clone, name the file `something.local.toml` —
+`.gitignore` excludes such files, and real paths do not get into the history.
 
-Заводить профиль ради одного прогона по другой ветке не нужно:
+You do not need a profile for one run on another branch:
 
 ```bash
-git-xfer list -p myproj --to b -b feature/login    # обе стороны
+git-xfer list -p myproj --to b -b feature/login    # both sides
 git-xfer list -p myproj --to b --source-branch feature/login --target-branch integration
 ```
 
-Флаг про одну сторону вторую не трогает: с профилем `-p myproj --to b
---source-branch feature/login` возьмёт `feature/login` из источника и
-положит в ветку цели из конфига. Имя «то же самое» подставляется только
-там, где о второй стороне не знает никто — то есть без профиля. У разового
-прогона свой служебный ref, так что обычные профили он не задевает.
+A flag for one side does not touch the other side: with the profile, `-p myproj --to b
+--source-branch feature/login` takes `feature/login` from the source and
+puts it into the target branch from the config. The name "the same" is used
+only where nobody knows about the other side — that is, without a profile.
+A one-time run has its own service ref, so it does not affect normal profiles.
 
-Можно и вовсе без конфига:
+You can also work with no config at all:
 
 ```bash
 git-xfer list --source ~/dev/repo-a --target ~/dev/repo-b -b master
-git-xfer apply --ask          # спросит репозитории и ветки
+git-xfer apply --ask          # asks for repositories and branches
 ```
 
 </details>
 
 <details>
-<summary><b>Рабочее состояние и журнал</b> — где лежат и как выключить</summary>
+<summary><b>Working state and log</b> — where they are and how to turn them off</summary>
 
-Кэш patch-id, маппинг перенесённых коммитов и незавершённую очередь
-утилита держит в `~/.local/state/git-xfer/` (учитывается
-`XDG_STATE_HOME`) — вне рабочих репозиториев, в git ничего не попадает.
-Там же журнал прогонов: какие команды git запускались, с каким кодом,
-сколько заняли, на каком коммите встала серия и с какой ошибкой.
+The utility keeps the patch-id cache, the mapping of transferred commits and
+an unfinished queue in `~/.local/state/git-xfer/` (`XDG_STATE_HOME` is
+respected) — outside the working repositories, nothing gets into git.
+The run log is there too: which git commands ran, with which code, how long
+they took, on which commit the series stopped and with which error.
 
 ```bash
-git-xfer status -p myproj --to b     # покажет путь к журналу и к state
+git-xfer status -p myproj --to b     # shows the path to the log and to the state
 tail -50 ~/.local/state/git-xfer/git-xfer.log
 ```
 
-Журнал ротируется (2 МБ, 5 файлов) и включён по умолчанию. Выключить —
-`log = false` в `[defaults]` или `--no-log` разово; увести в свой файл —
-`log_file` в конфиге или `--log-file`.
+The log rotates (2 MB, 5 files) and is on by default. To turn it off —
+`log = false` in `[defaults]` or `--no-log` for one run; to send it to your own
+file — `log_file` in the config or `--log-file`.
 
 </details>
 
-## Как этим пользоваться
+## How to use it
 
-Конфиг заполняется один раз. Дальше:
+You fill in the config once. Then:
 
 ```bash
-git-xfer list   -p myproj --to b              # что можно взять
-git-xfer plan   -p myproj --to b --commits 3,4   # где будут конфликты
+git-xfer list   -p myproj --to b              # what can be taken
+git-xfer plan   -p myproj --to b --commits 3,4   # where conflicts will be
 git-xfer apply  -p myproj --to b --commits 3,4 --yes
-# конфликт → правите руками, git add …
+# conflict → edit by hand, git add …
 git-xfer continue -p myproj --to b
 ```
 
-Объекты источника подтягиваются сами, так что начинать можно прямо
-с `list`.
+Source objects are fetched automatically, so you can start right
+with `list`.
 
-Когда вопрос не «что взять», а «чем они вообще разошлись», — `compare`:
+When the question is not "what to take" but "how did they diverge at all" — `compare`:
 
 ```bash
-git-xfer compare -p myproj --to b          # чего нет в b и что есть только в b
-git-xfer compare -p myproj --to b --files  # плюс список различающихся файлов
-git-xfer compare -p myproj --to b --json   # то же для агента и скриптов
+git-xfer compare -p myproj --to b          # what is missing in b and what is only in b
+git-xfer compare -p myproj --to b --files  # plus the list of differing files
+git-xfer compare -p myproj --to b --json   # the same for an agent and scripts
 ```
 
-Он показывает, какие файлы проекта сейчас отличаются, каких коммитов нет
-в цели (номера те же, что у `list`) и какие коммиты есть только в цели.
-Под таблицей — подсказки: у коммита файлы уже совпадают по обе стороны
-(переносить, скорее всего, незачем), те же файлы правили в цели (жди
-конфликта), коммит старше последнего перенесённого. Считается всё
-в целевом репозитории — источник не трогается. Советовать по этим данным,
-что переносить, умеет [скилл](#скилл-для-claude-code). Номера в `--commits` — из вывода `list` при тех же `--limit`
-и профиле; вместо номеров можно `--sha <хеш>`. Запущенный без флагов
-выбора в терминале, `apply` спросит всё сам — профиль, направление
-и коммиты.
+It shows which project files differ now, which commits are missing
+in the target (the numbers are the same as in `list`) and which commits exist only in the target.
+Under the table there are hints: the files of a commit already match on both sides
+(most likely there is no reason to transfer it), the same files were changed in the target (expect
+a conflict), the commit is older than the last transferred one. Everything is computed
+in the target repository — the source is not touched. The [skill](#skill-for-claude-code) can
+advise what to transfer based on this data. The numbers in `--commits` come from the output of `list` with the same `--limit`
+and profile; instead of numbers you can use `--sha <hash>`. When you run it without selection
+flags in a terminal, `apply` asks for everything itself — the profile, the direction
+and the commits.
 
-Одно ограничение, о котором стоит знать заранее: коммиты ложатся в ту ветку,
-которая сейчас выгружена в целевом репозитории, и профиль должен называть
-именно её. Ветка в профиле — заготовка на частый случай, а не единственно
-возможная: любой вызов принимает `--target-branch <ветка>` (и `--source-branch`,
-и `-b` для обеих сразу), так что заводить профиль под каждую ветку не нужно.
+One limitation that you should know about in advance: commits go to the branch
+that is currently checked out in the target repository, and the profile must name
+exactly that branch. The branch in the profile is a preset for the common case, not the only
+one possible: every call accepts `--target-branch <branch>` (and `--source-branch`,
+and `-b` for both at once), so you do not need a profile for each branch.
 
 ```bash
-git-xfer status -p myproj --to b          # в профиле master, выгружена feature/login
+git-xfer status -p myproj --to b          # the profile has master, feature/login is checked out
 git-xfer apply -p myproj --to b --target-branch feature/login --commits 1 --yes
 ```
 
-Строку `Ветка цели:` печатает `status`: в ней видно и то, что записано
-в профиле, и то, что выгружено на самом деле. Если они разошлись, `doctor`
-и `apply` остановятся с кодом `2` и ничего не тронут — переключитесь сами
-или назовите выгруженную ветку флагом. Ветки нет вовсе — `doctor` скажет
-и это, отдельной формулировкой: опечатка в имени и желание завести новую
-ветку выглядят одинаково, и различить их может только человек.
+`status` prints the line `Ветка цели:` (Target branch): it shows both what is written
+in the profile and what is actually checked out. If they differ, `doctor`
+and `apply` stop with code `2` and touch nothing — switch yourself
+or name the checked-out branch with a flag. If the branch does not exist at all, `doctor` says
+this too, in a separate message: a typo in the name and the wish to create a new
+branch look the same, and only a person can tell them apart.
 
-Флаги ветки — часть адреса переноса: объекты источника такой вызов держит
-под своей ссылкой `refs/xfer/*`. Поэтому `cleanup` зовите с теми же флагами,
-которыми переносили, либо `git-xfer cleanup --all`.
+Branch flags are part of the transfer address: such a call keeps the source objects
+under its own ref `refs/xfer/*`. So call `cleanup` with the same flags
+that you used for the transfer, or `git-xfer cleanup --all`.
 
-### Пометки в списке
+### Marks in the list
 
-| | значение | откуда известно |
+| | meaning | how it is known |
 |---|---|---|
-| `+` | новый | ни один канал не сработал |
-| `−` | уже перенесён | локальный маппинг в state, а если включён `trailer` — то и он |
-| `≈` | похоже, перенесён | совпал patch-id |
+| `+` | new | no channel matched |
+| `−` | already transferred | the local mapping in the state, and if `trailer` is on — the trailer too |
+| `≈` | looks transferred | the patch-id matched |
 
-`≈` — эвристика, и она **никогда не прячет коммит молча**: строка остаётся
-в списке, выбрать её можно, а при переносе такой коммит обычно становится
-пустым и отбрасывается сам.
+`≈` is a heuristic, and it **never hides a commit silently**: the line stays
+in the list, you can select it, and during the transfer such a commit usually becomes
+empty and is dropped automatically.
 
-Рядом со статусом бывают ещё пометки — не про дедупликацию, а про охват
-и правила; сочетаются с любым из трёх значков (`+*×`):
+Next to the status there can be more marks — not about deduplication, but about scope
+and rules; they combine with any of the three marks (`+*×`):
 
-| | значение |
+| | meaning |
 |---|---|
-| `*` | коммит задевает и файлы вне подкаталога; приедет только внутренняя часть |
-| `×` | коммит подпал под правило `skip` — по умолчанию не переносится |
+| `*` | the commit also touches files outside the subdirectory; only the inside part arrives |
+| `×` | the commit matched a `skip` rule — by default it is not transferred |
 
-`*` появляется только у профилей с префиксом ([проект в подкаталоге](#проект-в-подкаталоге)),
-`×` — только при правилах в конфиге ([какие коммиты не переносить](#какие-коммиты-не-переносить)).
+`*` appears only for profiles with a prefix ([project in a subdirectory](#project-in-a-subdirectory)),
+`×` — only with rules in the config ([commits to skip](#commits-to-skip)).
 
 <details>
-<summary><b>Как это выглядит целиком</b> — интерактивный прогон в обе стороны</summary>
+<summary><b>What it looks like in full</b> — an interactive run in both directions</summary>
 
-Запуск без аргументов спрашивает профиль и направление:
+A run without arguments asks for the profile and the direction:
 
 ```console
 $ git-xfer apply
@@ -502,7 +507,7 @@ $ git-xfer apply
   выбор [1]: 1
 ```
 
-Дальше показывается, что можно взять:
+Then it shows what can be taken:
 
 ```console
  1 + d772cb8 2024-02-08 Ann Source chore: хвостовой коммит
@@ -516,11 +521,11 @@ $ git-xfer apply
 Выбор [1,3,5-7 | all | !N | /текст — фильтр | n/p — страница | q — отмена]: 3,4
 ```
 
-Пустой ввод — **отмена**, не «выбрать всё». Весь ввод проверяется целиком
-до того, как что-нибудь произойдёт.
+Empty input means **cancel**, not "select all". The whole input is checked
+before anything happens.
 
-Перед тем как что-то делать, печатается фактический порядок применения —
-список идёт newest-first, как `git log`, а применяется наоборот:
+Before it does anything, it prints the actual order of application —
+the list is newest-first, like `git log`, and it is applied in reverse:
 
 ```console
 Порядок применения (old → new), коммитов: 2
@@ -534,8 +539,8 @@ $ git-xfer apply
 Перенесено: 2; пусто: 0; пропущено: 0
 ```
 
-Обратно — то же самое, на шаге «Куда переносим» выбираете второй пункт.
-Перенесённое утилита узнаёт с обеих сторон и по кругу не гоняет:
+Back is the same: at the "Куда переносим" (Where to transfer) step you select the second item.
+The utility recognizes transferred commits on both sides and does not send them around in circles:
 
 ```console
 $ git-xfer list -p myproj --to a
@@ -546,293 +551,293 @@ $ git-xfer list -p myproj --to a
   + новый: 1   ≈ совпал patch-id: 0   − уже перенесён: 2
 ```
 
-Полный цикл одной стороны, если нужны все шаги явно:
+The full cycle for one side, if you need all steps explicitly:
 
 ```bash
-git-xfer doctor -p myproj --to b     # предполётные проверки
-git-xfer sync   -p myproj --to b     # подтянуть объекты source → target
+git-xfer doctor -p myproj --to b     # preflight checks
+git-xfer sync   -p myproj --to b     # fetch objects source → target
 git-xfer list   -p myproj --to b
 git-xfer plan   -p myproj --to b -i
 git-xfer apply  -p myproj --to b -i
-git-xfer continue -p myproj --to b   # после разрешения конфликта
-git-xfer cleanup  -p myproj --to b   # убрать служебные ссылки
+git-xfer continue -p myproj --to b   # after the conflict is resolved
+git-xfer cleanup  -p myproj --to b   # remove service refs
 ```
 
 </details>
 
 <details>
-<summary><b>Конфликт</b> — что делать и чем это отличается от штатного cherry-pick</summary>
+<summary><b>Conflict</b> — what to do and how this differs from the standard cherry-pick</summary>
 
-Серия встаёт на конфликтном коммите и возвращает код `3`. Рабочее дерево
-в этот момент — обычное состояние `cherry-pick`: маркеры в файлах,
-незавершённая операция.
+The series stops on the conflicting commit and returns code `3`. The working tree
+at this moment is the normal `cherry-pick` state: markers in the files,
+an unfinished operation.
 
 ```bash
-# правите файлы, потом
-git add <файлы>
-git-xfer continue -p myproj --to b   # доведёт коммит и докрутит очередь
-git-xfer skip     -p myproj --to b   # бросить этот коммит, идти дальше
-git-xfer abort    -p myproj --to b   # отменить текущий коммит
+# edit the files, then
+git add <files>
+git-xfer continue -p myproj --to b   # finishes the commit and runs the rest of the queue
+git-xfer skip     -p myproj --to b   # drop this commit, go on
+git-xfer abort    -p myproj --to b   # cancel the current commit
 ```
 
-`abort` здесь честнее штатного: он откатывает **только** коммит, на котором
-встали, а всё уже перенесённое остаётся на месте. Штатный
-`cherry-pick --abort` на серии снёс бы и все ранее разрешённые конфликты.
+`abort` here is more honest than the standard one: it rolls back **only** the commit
+where the series stopped, and everything already transferred stays in place. The standard
+`cherry-pick --abort` on a series would also remove all conflicts resolved earlier.
 
-Если вы закоммитили разрешение сами (`git cherry-pick --continue` руками),
-`git-xfer continue` это распознает и примет как есть.
+If you committed the resolution yourself (`git cherry-pick --continue` by hand),
+`git-xfer continue` recognizes this and accepts it as is.
 
 </details>
 
-## Подкоманды
+## Subcommands
 
-| команда | что делает |
+| command | what it does |
 |---|---|
-| `init` | создать шаблон конфига |
-| `doctor` | предполётные проверки |
-| `sync` | перенести объекты source → target |
-| `list` | таблица коммитов источника (`--new` — только непереносившиеся) |
-| `compare` | чего нет в цели и что есть только в ней (`--files`, `--json`) |
-| `plan` | сухой прогон: где будут конфликты, без касания рабочего дерева; считает от ветки цели, даже если выгружена другая |
-| `apply` | перенести выбранные коммиты |
-| `continue` / `skip` / `abort` | управление паузой на конфликте |
-| `status` | состояние незавершённого переноса |
-| `cleanup` | убрать `refs/xfer/*` (`--all`, `--state`) |
+| `init` | create a config template |
+| `doctor` | preflight checks |
+| `sync` | transfer objects source → target |
+| `list` | table of source commits (`--new` — only those not transferred yet) |
+| `compare` | what is missing in the target and what exists only there (`--files`, `--json`) |
+| `plan` | dry run: where conflicts will be, without touching the working tree; computes from the target branch, even if another one is checked out |
+| `apply` | transfer the selected commits |
+| `continue` / `skip` / `abort` | control the pause on a conflict |
+| `status` | state of an unfinished transfer |
+| `cleanup` | remove `refs/xfer/*` (`--all`, `--state`) |
 
-Общие флаги: `-p/--profile`, `--config`, `-v` (печатать вызовы git),
-`-n/--dry-run`, `--no-log` и `--log-file`. Направление и разовые
-переопределения — у всех подкоманд, кроме `init`: `--to a|b`,
+Common flags: `-p/--profile`, `--config`, `-v` (print git calls),
+`-n/--dry-run`, `--no-log` and `--log-file`. The direction and one-time
+overrides are available in all subcommands except `init`: `--to a|b`,
 `-b/--branch`, `--source-branch` / `--target-branch`, `--source` /
 `--target`, `--source-prefix` / `--target-prefix`, `--ask`.
 
 <details>
-<summary><b>Флаги <code>apply</code> и коды выхода</b></summary>
+<summary><b><code>apply</code> flags and exit codes</b></summary>
 
-| флаг | по умолчанию |
+| flag | default |
 |---|---|
-| `--trailer` / `--no-trailer` | без трейлера `(cherry picked from commit …)` (ключ `trailer`) |
-| `--keep-author` / `--reset-author` | автор сбрасывается на того, кто переносит (ключ `keep_author`) |
-| `--keep-coauthors` / `--strip-coauthors` | строки `Co-authored-by:` вырезаются (ключ `keep_coauthors`) |
-| `--squash` / `--no-squash` | без схлопывания: коммит в коммит (ключ `squash`) |
-| `--message TEXT` | сообщение схлопнутого коммита; без него — сообщения серии подряд |
-| `--empty=drop\|keep\|stop` | `drop` — ставший пустым коммит уже перенесён |
-| `--hooks` | хуки отключены (`core.hooksPath=/dev/null`) |
+| `--trailer` / `--no-trailer` | no `(cherry picked from commit …)` trailer (key `trailer`) |
+| `--keep-author` / `--reset-author` | the author is reset to the person who transfers (key `keep_author`) |
+| `--keep-coauthors` / `--strip-coauthors` | `Co-authored-by:` lines are removed (key `keep_coauthors`) |
+| `--squash` / `--no-squash` | no squashing: commit for commit (key `squash`) |
+| `--message TEXT` | message of the squashed commit; without it — the messages of the series in a row |
+| `--empty=drop\|keep\|stop` | `drop` — a commit that became empty is already transferred |
+| `--hooks` | hooks are disabled (`core.hooksPath=/dev/null`) |
 | `--gpg-sign` | `--no-gpg-sign` |
-| `--keep-committer-date` | committer date = сейчас |
-| `--allow-merges` | merge-коммиты не попадают даже в таблицу |
-| `--include-skipped` | коммиты под правилами `skip` не берутся (есть и у `plan`) |
+| `--keep-committer-date` | committer date = now |
+| `--allow-merges` | merge commits do not even get into the table |
+| `--include-skipped` | commits under `skip` rules are not taken (also available in `plan`) |
 
-Пара с ключом конфига работает как обычно: значение из `[defaults]`,
-поверх — из профиля, поверх — флаг этого вызова.
+A pair with a config key works as usual: the value from `[defaults]`,
+on top of it — from the profile, on top of that — the flag of this call.
 
-| код | значение |
+| code | meaning |
 |---|---|
-| `0` | успех |
-| `1` | ошибка вызова, разбора аргументов или конфига |
-| `2` | предполётная проверка не прошла |
-| `3` | конфликт, перенос на паузе — ждём `continue` |
-| `4` | ошибка git |
+| `0` | success |
+| `1` | error in the call, argument parsing or config |
+| `2` | a preflight check failed |
+| `3` | conflict, the transfer is paused — waiting for `continue` |
+| `4` | git error |
 | `130` | Ctrl-C |
 
 </details>
 
-## Скилл для Claude Code
+## Skill for Claude Code
 
-Про установку и обычный сценарий сказано [в начале](#самый-короткий-путь--через-агента);
-здесь — что скилл делает внутри и как настроить его поведение.
+Installation and the normal scenario are described [at the beginning](#the-shortest-path--via-an-agent);
+this section covers what the skill does inside and how to configure its behavior.
 
-Инструкция в `skills/git-xfer/SKILL.md` самодостаточная: агенту хватит
-ссылки на этот репозиторий. Порядок у него жёсткий — `doctor`, `sync`,
-`list` (или `compare`, когда просят сравнить и посоветовать), разбор
-пометок и диффов, предложение набора коммитов с обоснованием,
-сухой прогон и только потом `apply`, после вашего «да». Спрашивает он
-не больше двух раз: ветку цели (если вы её не назвали) и одно итоговое
-подтверждение — откуда, куда, какие
-коммиты, что покажет сухой прогон. Дальше доводит сам: незакоммиченные
-правки в цели прячет в stash и после переноса возвращает, на нужную ветку
-переключается и потом переключается обратно. Интерактивные
-флаги (`-i`, `--ask`) ему запрещены: у него нет терминала, и зависнуть
-на вопросе он не должен. Частые поломки опознаёт по таблице симптомов,
-а не гадает.
+The instruction in `skills/git-xfer/SKILL.md` is self-contained: a link to this
+repository is enough for the agent. Its order is strict — `doctor`, `sync`,
+`list` (or `compare`, when you ask to compare and advise), analysis of the
+marks and diffs, a proposed set of commits with reasons,
+a dry run, and only then `apply`, after your "yes". It asks
+at most twice: the target branch (if you did not name it) and one final
+confirmation — from where, to where, which
+commits, what the dry run shows. Then it finishes by itself: it stashes uncommitted
+changes in the target and restores them after the transfer, switches to the needed branch
+and then switches back. Interactive
+flags (`-i`, `--ask`) are forbidden for it: it has no terminal, and it must not
+hang on a question. It identifies common failures by a table of symptoms
+and does not guess.
 
-Единственное, что стоит настроить, — насколько самостоятельно он
-разбирает конфликты:
+The only thing worth configuring is how independently it
+resolves conflicts:
 
 ```toml
 [agent]
 resolve_conflicts = "mechanical"
 ```
 
-| значение | что делает агент при конфликте |
+| value | what the agent does on a conflict |
 |---|---|
-| `ask` | ничего не правит: показывает суть и предлагает решение |
-| `mechanical` | механические чинит сам (импорты, соседние строки, форматирование, сгенерённое), смысловые выносит вам |
-| `auto` | разбирает всё сам и отчитывается постфактум |
+| `ask` | edits nothing: shows the essence and proposes a resolution |
+| `mechanical` | fixes mechanical ones itself (imports, adjacent lines, formatting, generated code), gives semantic ones to you |
+| `auto` | resolves everything itself and reports afterwards |
 
-Настройку читает скилл; сама утилита по ней ничего не делает — но проверяет
-значение (опечатка не окажется молчаливой) и показывает его в `git-xfer
-status`. Разовое указание словами главнее конфига.
+The skill reads this setting; the utility itself does nothing with it — but it checks
+the value (a typo does not stay silent) and shows it in `git-xfer
+status`. A one-time instruction in words overrides the config.
 
-`auto` включайте осознанно: ошибка в смысловом конфликте уезжает коммитом
-в рабочий репозиторий и выглядит как успешный перенос.
+Turn on `auto` deliberately: a mistake in a semantic conflict goes as a commit
+into the working repository and looks like a successful transfer.
 
-## Под капотом
+## Under the hood
 
 <details>
-<summary><b>Как это устроено</b> — fetch по пути, очередь по одному коммиту, проекция префикса, четыре канала дедупликации</summary>
+<summary><b>How it works</b> — fetch by path, a queue of one commit at a time, prefix projection, four deduplication channels</summary>
 
-**Объекты переносятся `fetch`'ем по локальному пути**, без `git remote add`:
+**Objects are transferred with `fetch` by a local path**, without `git remote add`:
 
 ```
 git -C <TARGET> -c protocol.file.allow=always \
   fetch --no-tags --no-write-fetch-head -- <SOURCE> \
-  '+refs/heads/<branch>:refs/xfer/<профиль>/head'
+  '+refs/heads/<branch>:refs/xfer/<profile>/head'
 ```
 
-`--no-tags` обязателен — иначе чужие теги осядут в `refs/tags/*` рабочего
-репозитория. Созданная ссылка в `refs/xfer/*` держит объекты от `gc`
-и убирается подкомандой `cleanup`. Ни remote'ов, ни `FETCH_HEAD`,
-ни тегов в целевом репозитории не прибавляется.
+`--no-tags` is mandatory — otherwise foreign tags settle in `refs/tags/*` of the working
+repository. The created ref in `refs/xfer/*` keeps the objects from `gc`,
+and the `cleanup` subcommand removes it. No remotes, no `FETCH_HEAD`,
+no tags are added to the target repository.
 
-**Коммиты применяются по одному**, а не одной командой `cherry-pick A B C`.
-При одном rev git идёт в `single_pick()` и каталог `.git/sequencer`
-не создаёт вовсе — поэтому своя очередь в state даёт точный прогресс,
-опции на каждый коммит и, главное, честный `abort`: он откатывает только
-текущий коммит, тогда как штатный `cherry-pick --abort` на серии сносит
-все уже разрешённые конфликты.
+**Commits are applied one at a time**, not with one command `cherry-pick A B C`.
+With one rev, git goes into `single_pick()` and does not create the `.git/sequencer`
+directory at all — so our own queue in the state gives exact progress,
+options for each commit and, most importantly, an honest `abort`: it rolls back only
+the current commit, while the standard `cherry-pick --abort` on a series removes
+all already resolved conflicts.
 
-**Cherry-pick через несвязанные истории работает без оговорок** — это
-трёхсторонний merge с базой `C^`, merge-base не вычисляется. Для корневого
-коммита база — пустое дерево.
+**Cherry-pick across unrelated histories works without exceptions** — it is
+a three-way merge with the base `C^`, no merge-base is computed. For a root
+commit the base is the empty tree.
 
-**Смена префикса — это проекция коммита, а не второй бэкенд.**
-`cherry-pick` пути не переписывает, поэтому перед ним синтезируется
-временный коммит: берётся поддерево `<sha>:<префикс>`, такое же поддерево
-у первого родителя, при необходимости оба вкладываются под префикс другой
-стороны, и пара деревьев склеивается в коммит с одним родителем. Диффом
-получается ровно нужный набор путей, а весь остальной механизм — очередь,
-конфликт, `continue`/`abort`, сухой прогон — работает без единой оговорки.
-Трейлер, если он включён, вписывается не флагом `-x` (тот указал бы
-на синтетический коммит), а прямо в сообщение проекции, и ведёт на оригинал.
+**A prefix change is a projection of the commit, not a second backend.**
+`cherry-pick` does not rewrite paths, so before it a temporary commit
+is synthesized: it takes the subtree `<sha>:<prefix>`, the same subtree
+of the first parent, if necessary nests both under the prefix of the other
+side, and joins the pair of trees into a commit with one parent. The diff
+is exactly the needed set of paths, and all the rest of the mechanism — the queue,
+the conflict, `continue`/`abort`, the dry run — works without a single exception.
+The trailer, if it is on, is written not with the `-x` flag (that would point
+to the synthetic commit), but directly into the projection message, and it points to the original.
 
-Пока перенос стоит на паузе, `CHERRY_PICK_HEAD` указывает на этот
-синтетический коммит: `git show CHERRY_PICK_HEAD` покажет правильное
-сообщение и автора, но родителя из реальной истории у него нет. От `gc`
-его держит ссылка `refs/xfer/<профиль>/pick`, которая снимается по
-окончании серии, при `abort` и подкомандой `cleanup`.
+While the transfer is paused, `CHERRY_PICK_HEAD` points to this
+synthetic commit: `git show CHERRY_PICK_HEAD` shows the correct
+message and author, but it has no parent from the real history. The ref
+`refs/xfer/<profile>/pick` keeps it from `gc`; the ref is removed at the
+end of the series, on `abort` and by the `cleanup` subcommand.
 
-**Дедупликация — четыре канала**, по убыванию надёжности: трейлер `-x`
-в целевой истории; трейлер самого коммита-источника, указывающий на коммит,
-который уже лежит в цели (так выглядит обратное направление); локальный
-маппинг src→dst в state; patch-id. Два трейлерных канала работают, только
-если трейлер включён (`trailer = true`) — по умолчанию его нет, и остаются
-маппинг и patch-id. Маппинг при этом работает лишь в ту сторону, в которую
-переносили: state заведён на целевой репозиторий (`sha1(realpath(target))`),
-и в обратном направлении это уже другой файл.
+**Deduplication has four channels**, from most to least reliable: the `-x` trailer
+in the target history; the trailer of the source commit itself that points to a commit
+that is already in the target (this is how the reverse direction looks); the local
+src→dst mapping in the state; patch-id. The two trailer channels work only
+if the trailer is on (`trailer = true`) — by default there is none, and what remains is
+the mapping and patch-id. The mapping also works only in the direction in which
+you transferred: the state belongs to the target repository (`sha1(realpath(target))`),
+and in the reverse direction it is a different file.
 
-**Схлопывание — это `reset --soft` в конце, а не отдельный бэкенд.** Серия
-проигрывается обычным путём, со своей очередью, конфликтами и `continue`;
-когда очередь пуста, HEAD откатывается на точку старта (`progress.head_before`)
-с сохранением дерева и индекса, и делается один коммит. Маппинг `src→dst`
-переписывается на него для всех вошедших коммитов — иначе дедупликация
-сослалась бы на коммиты, которых в истории больше нет.
+**Squashing is a `reset --soft` at the end, not a separate backend.** The series
+is replayed the normal way, with its own queue, conflicts and `continue`;
+when the queue is empty, HEAD is moved back to the start point (`progress.head_before`)
+keeping the tree and the index, and one commit is made. The `src→dst` mapping
+is rewritten to point to it for all included commits — otherwise deduplication
+would refer to commits that are no longer in the history.
 
-**Автор и соавторы переписываются после коммита, а не во время.** У
-`cherry-pick` своего `--reset-author` нет: автора и сообщение он всегда берёт
-из исходного коммита. Поэтому сразу после каждого успешного шага — и после
-`continue` тоже — идёт один `git commit --amend`: `--reset-author` и сообщение
-без трейлеров `Co-authored-by:`, пока коммит ещё вершина ветки. Вырезаются
-только трейлеры в последнем абзаце, остальное сообщение остаётся байт в байт.
-Шага нет, если автора оставляют (`keep_author = true`) и вырезать нечего:
-соавторов нет или `keep_coauthors = true`. Служебные коммиты
-git-xfer (этот amend и схлопывание) идут мимо хуков всегда, даже при
-`--hooks`: `--hooks` значит «прогнать хуки на переносимом коммите», и это
-делает `cherry-pick`, а `pre-commit`, которого у `cherry-pick` нет вовсе,
-порвал бы серию на доводке.
+**Author and co-authors are rewritten after the commit, not during it.**
+`cherry-pick` has no `--reset-author` of its own: it always takes the author and the message
+from the source commit. So right after each successful step — and after
+`continue` too — there is one `git commit --amend`: `--reset-author` and the message
+without `Co-authored-by:` trailers, while the commit is still the tip of the branch. Only
+the trailers in the last paragraph are removed, the rest of the message stays byte for byte.
+There is no such step if the author is kept (`keep_author = true`) and there is nothing to remove:
+there are no co-authors or `keep_coauthors = true`. The service commits of
+git-xfer (this amend and the squash) always bypass hooks, even with
+`--hooks`: `--hooks` means "run the hooks on the transferred commit", and
+`cherry-pick` does this, while `pre-commit`, which `cherry-pick` does not have at all,
+would break the series at the finishing step.
 
-**patch-id считается сам, `git cherry` не используется.** В `cmd_cherry()`
-аргумент `<limit>` применяется уже *после* `get_patch_ids()`, поэтому при
-несвязанных историях patch-id считаются по всей целевой истории — на большом
-репозитории это минуты. Здесь вместо этого окно `patchid_window` и кэш в state.
+**patch-id is computed by the tool itself, `git cherry` is not used.** In `cmd_cherry()`
+the `<limit>` argument is applied only *after* `get_patch_ids()`, so with
+unrelated histories patch-ids are computed for the whole target history — on a large
+repository this takes minutes. Here instead there is the `patchid_window` window and a cache in the state.
 
-**Сухой прогон не трогает рабочее дерево**: `git merge-tree --write-tree`
-цепочкой по всей очереди, выходное дерево становится базой для следующего
-коммита. Одна оговорка: у профиля с префиксом `plan` (и любая команда под
-`-n`) всё же пишет в целевой репозиторий loose-объекты — деревья и коммиты
-проекции. Ни одна ссылка на них не заводится, в историю они не попадают
-и подбираются `git gc`, как и объекты источника после `cleanup`.
-
-</details>
-
-<details>
-<summary><b>Ограничения и побочные эффекты</b></summary>
-
-- **Первый `sync` притащит полный pack** от кончика ветки источника. Общего
-  предка нет, negotiation работать не на чем. Блобы дедуплицируются по SHA,
-  так что на практике это commit- и tree-объекты — десятки процентов
-  размера репозитория, но не второй репозиторий целиком.
-- **`≈` — эвристика.** `patch-id --stable` игнорирует пробельные различия,
-  а одинаковые диффы в разных местах истории дают одинаковый id. Поэтому
-  такой коммит помечается, но не скрывается.
-- **Merge-коммиты по умолчанию не переносятся.** `-m 1` схлопывает влитую
-  ветку в один коммит — почти никогда не то, что нужно. Флаг `--allow-merges`
-  есть, но применяйте осознанно.
-- **`--keep-committer-date` ломает предположение git** о неубывающих
-  таймстампах коммитера; `git log --since` и подобное начнут врать.
-- **Хуки отключены.** Переносится уже проверенный коммит, и падающий линтер
-  не должен рвать серию посреди очереди. Вернуть — `--hooks`.
-- **Сабмодули** переносятся как гитлинк: указатель обновится, содержимое —
-  нет. `doctor` предупредит.
-- **`rerere`** может молча подставить прошлое разрешение конфликта.
-  `doctor` предупредит.
-- **Различия `core.autocrlf` / `.gitattributes`** между репозиториями ломают
-  и patch-id, и сам merge. `doctor` предупредит.
-- **Коммит на границе подкаталога приезжает наполовину** — часть вне
-  префикса остаётся в источнике. Строка помечена `*`, но решение за вами.
-- **Переименование через границу подкаталога** превращается в удаление
-  (файл уехал наружу) или в добавление целиком (приехал внутрь): за
-  пределами префикса второй половины пары просто нет.
-- **Rename-детекция при обратном переносе** видит весь репозиторий вне
-  префикса как «добавленные файлы» и в редком случае может спарить
-  удалённый внутри префикса файл с похожим снаружи. Разрешается вручную,
-  как обычный конфликт.
-- После `cleanup` объекты источника становятся недостижимыми, и `git fsck`
-  покажет их как `dangling`. Это ожидаемо; освободит их `git gc`.
-- Конфиг только читается. Профиль с `source == target` блокируется.
+**The dry run does not touch the working tree**: `git merge-tree --write-tree`
+in a chain over the whole queue, the output tree becomes the base for the next
+commit. One exception: for a profile with a prefix, `plan` (and any command with
+`-n`) still writes loose objects into the target repository — the trees and commits
+of the projection. No ref points to them, they do not get into the history,
+and `git gc` collects them, like the source objects after `cleanup`.
 
 </details>
 
 <details>
-<summary><b>Проверка</b> — сквозной прогон на одноразовых репозиториях</summary>
+<summary><b>Limitations and side effects</b></summary>
 
-Рабочие репозитории не трогает, всё живёт во временном каталоге
-и удаляется в конце:
+- **The first `sync` fetches a full pack** from the tip of the source branch. There is no common
+  ancestor, so negotiation has nothing to work with. Blobs are deduplicated by SHA,
+  so in practice these are commit and tree objects — tens of percent of the
+  repository size, but not a whole second repository.
+- **`≈` is a heuristic.** `patch-id --stable` ignores whitespace differences,
+  and identical diffs in different places of the history give the same id. So
+  such a commit is marked, but not hidden.
+- **Merge commits are not transferred by default.** `-m 1` squashes the merged
+  branch into one commit — almost never what you need. The `--allow-merges` flag
+  exists, but use it deliberately.
+- **`--keep-committer-date` breaks the git assumption** of non-decreasing
+  committer timestamps; `git log --since` and similar will start to lie.
+- **Hooks are disabled.** What is transferred is an already checked commit, and a failing linter
+  must not break the series in the middle of the queue. To turn them back on — `--hooks`.
+- **Submodules** are transferred as a gitlink: the pointer is updated, the contents
+  are not. `doctor` warns.
+- **`rerere`** can silently reuse a past conflict resolution.
+  `doctor` warns.
+- **Differences in `core.autocrlf` / `.gitattributes`** between the repositories break
+  both patch-id and the merge itself. `doctor` warns.
+- **A commit on the subdirectory boundary arrives half-way** — the part outside the
+  prefix stays in the source. The line is marked `*`, but the decision is yours.
+- **A rename across the subdirectory boundary** becomes a deletion
+  (the file moved outside) or a full addition (it moved inside): outside
+  the prefix the second half of the pair simply does not exist.
+- **Rename detection on a reverse transfer** sees the whole repository outside the
+  prefix as "added files" and in a rare case can pair a file
+  deleted inside the prefix with a similar one outside. You resolve it by hand,
+  like a normal conflict.
+- After `cleanup` the source objects become unreachable, and `git fsck`
+  shows them as `dangling`. This is expected; `git gc` frees them.
+- The config is only read. A profile with `source == target` is blocked.
+
+</details>
+
+<details>
+<summary><b>Testing</b> — an end-to-end run on throwaway repositories</summary>
+
+It does not touch the working repositories, everything lives in a temporary directory
+and is deleted at the end:
 
 ```bash
-sh tests/smoke.sh          # 356 проверок
-KEEP=1 sh tests/smoke.sh   # оставить стенд для разбора
+sh tests/smoke.sh          # 356 checks
+KEEP=1 sh tests/smoke.sh   # keep the test bench for analysis
 ```
 
-Стенд (`tests/fixture.sh`) собирает две пары несвязанных репозиториев.
-Первая — с одинаковым стартовым деревом и разошедшимися историями:
-конфликтующая правка, дубль уже имеющегося изменения, корневой коммит,
-бинарный файл, переименование и merge-коммит. Вторая — монорепозиторий
-с проектом в подкаталоге и тот же проект в корне отдельного репозитория:
-коммиты внутри подкаталога, снаружи и на границе, переименование через
-границу и влитая merge-ом ветка.
+The test bench (`tests/fixture.sh`) builds two pairs of unrelated repositories.
+The first has the same initial tree and diverged histories:
+a conflicting change, a duplicate of an existing change, a root commit,
+a binary file, a rename and a merge commit. The second is a monorepo
+with a project in a subdirectory and the same project at the root of a separate repository:
+commits inside the subdirectory, outside it and on the boundary, a rename across
+the boundary and a branch merged with a merge commit.
 
 </details>
 
 <details>
-<summary><b>Что не входит в эту версию</b></summary>
+<summary><b>Not in this version</b></summary>
 
-- бэкенд `format-patch` + `am -3` для случая «в целевой репозиторий нельзя
-  добавить вообще ничего» (точка расширения заложена в `transfer.py`);
-- первичный переезд всей истории подкаталога разом — этим занимается
-  `git subtree split`, здесь переносятся выбранные коммиты.
+- a `format-patch` + `am -3` backend for the case "nothing at all may be added
+  to the target repository" (the extension point is in `transfer.py`);
+- an initial move of the whole history of a subdirectory at once — `git subtree split`
+  does this; here selected commits are transferred.
 
 </details>
 
-## Лицензия
+## License
 
 MIT.

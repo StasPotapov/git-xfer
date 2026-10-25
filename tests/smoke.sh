@@ -502,7 +502,7 @@ sk "os.getcwd()" "исчезнувший каталог"
 sk "uv tool install git+https://github.com/StasPotapov/git-xfer" "установка из открытого репозитория"
 # Репозиторий публичный: доступ для клона не нужен, и скилл не должен
 # отправлять агента за ним к человеку.
-if grep -qiE 'приватн|нужен доступ' "$SKILL"; then
+if grep -qiE 'приватн|нужен доступ|private|need access' "$SKILL"; then
   bad "в скилле не осталось утверждений о приватности репозитория"
 else
   ok "в скилле не осталось утверждений о приватности репозитория"
@@ -749,26 +749,26 @@ for KEY in trailer keep_author keep_coauthors squash; do
     bad "у ключа $KEY расшифрованы оба значения"
   fi
 done
-doc "| \`false\` — по умолчанию |" "$ROOT/README.md" "в README есть таблица значений ключей"
+doc "| \`false\` — default |" "$ROOT/README.md" "в README есть таблица значений ключей"
 doc "--squash" "$ROOT/README.md" "README описывает squash"
 # Скилл обязан СПРАШИВАТЬ про схлопывание, а не решать сам: обещание
 # «одним коммитом или по одному» должно быть прописано словами.
-doc "одним или по одному" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про схлопывание"
+doc "squash into one or one by one" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про схлопывание"
 # Ветка из конфига — заготовка, а не согласие: скилл обязан спрашивать,
 # куда коммитить, и знать флаг, которым это передаётся.
-doc "Ветка цели — спроси" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про ветку цели"
-doc "--target-branch <ветка>" "$ROOT/skills/git-xfer/SKILL.md" "и знает, каким флагом её передать"
-doc "Что выяснить до переноса" "$ROOT/skills/git-xfer/SKILL.md" "у скилла есть сводное интервью"
+doc "Target branch — ask" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает про ветку цели"
+doc "--target-branch <branch>" "$ROOT/skills/git-xfer/SKILL.md" "и знает, каким флагом её передать"
+doc "What to find out before the transfer" "$ROOT/skills/git-xfer/SKILL.md" "у скилла есть сводное интервью"
 # Совпадение ветки в конфиге и в рабочем дереве — не повод промолчать:
 # именно этот соблазн и приводит к коммиту не в ту ветку.
-doc "спрашивай **каждый раз**" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает ветку каждый раз, а не при расхождении"
-doc "как в источнике" "$ROOT/skills/git-xfer/SKILL.md" "среди вариантов есть ветка как у источника"
+doc "ask **every time**" "$ROOT/skills/git-xfer/SKILL.md" "скилл спрашивает ветку каждый раз, а не при расхождении"
+doc "same as in the source" "$ROOT/skills/git-xfer/SKILL.md" "среди вариантов есть ветка как у источника"
 doc "switch -c" "$ROOT/skills/git-xfer/SKILL.md" "скилл умеет предложить создать ветку"
 doc "cleanup --all" "$ROOT/skills/git-xfer/SKILL.md" "скилл знает, что ссылки варианта убираются --all"
 # Скилл обязан прямым текстом запрещать интерактивные вызовы: именно на них
 # агент без терминала встаёт намертво.
-doc "Никогда не запускай" "$ROOT/skills/git-xfer/SKILL.md" "скилл запрещает интерактив списком"
-doc "Если команда не отвечает" "$ROOT/skills/git-xfer/SKILL.md" "и учит, что делать при зависании"
+doc "Never run" "$ROOT/skills/git-xfer/SKILL.md" "скилл запрещает интерактив списком"
+doc "If a command does not respond" "$ROOT/skills/git-xfer/SKILL.md" "и учит, что делать при зависании"
 python3 - "$ROOT" <<'TEMPLATE_PY' && ok "шаблон init описывает новые ключи" || bad "шаблон init описывает новые ключи"
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -776,7 +776,7 @@ from gitxfer.config import CONFIG_TEMPLATE
 sys.exit(0 if all(k in CONFIG_TEMPLATE for k in ("keep_author", "trailer", "squash", "git_timeout")) else 1)
 TEMPLATE_PY
 
-if sed -n '/Что не входит в эту версию/,$p' "$ROOT/README.md" | grep -q "префикс"; then
+if sed -n '/Not in this version/,$p' "$ROOT/README.md" | grep -qi "prefix"; then
   bad "пункт про префикс убран из «что не входит»"
 else
   ok "пункт про префикс убран из «что не входит»"
@@ -1065,7 +1065,7 @@ OUT=$(xfer list -p t --to b)
 has "− .*feat: zeta" "$OUT" "в ту же сторону коммит помечен как перенесённый"
 OUT=$(xfer list -p t --to a 2>&1)
 hasnt "− .*feat: zeta" "$OUT" "а в обратную — не помечен: маппинг односторонний"
-doc "маппинг в state заведён на целевой репозиторий" "$ROOT/skills/git-xfer/SKILL.md" "скилл честно про обратное направление"
+doc "the mapping in state is keyed to the target repository" "$ROOT/skills/git-xfer/SKILL.md" "скилл честно про обратное направление"
 
 echo "== 49. status показывает, в какую ветку на самом деле ляжет =="
 xfer cleanup -p t --to b --state >/dev/null 2>&1

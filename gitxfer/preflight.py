@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,6 +74,31 @@ class Report:
         if self.failures:
             details = "\n".join(c.render() for c in self.failures)
             raise PreflightError("предполётная проверка не прошла:\n" + details)
+
+
+#: `cherry-pick --empty=drop|keep|stop` появился в git 2.45.
+MIN_GIT = (2, 45)
+
+
+def git_version(git: Git) -> tuple[int, ...] | None:
+    """Версия git как кортеж чисел; None — если вывод не разобрать."""
+    probe = git.run("--version", check=False)
+    match = re.search(r"(\d+)\.(\d+)", probe.text) if probe.ok else None
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _check_git_version(git: Git, report: Report) -> bool:
+    have = git_version(git)
+    need = ".".join(str(part) for part in MIN_GIT)
+    if have is None:
+        report.add("версия git", WARN, f"не удалось разобрать `git --version`, нужен {need}+")
+        return True
+    shown = ".".join(str(part) for part in have)
+    if have < MIN_GIT:
+        report.add("версия git", FAIL, f"{shown}, нужен {need}+ ради `cherry-pick --empty`")
+        return False
+    report.add("версия git", OK, shown)
+    return True
 
 
 # -- мелкие помощники, нужные и в других модулях -------------------------
@@ -346,6 +372,8 @@ def _check_prefixes(git_target: Git, git_source: Git, profile: Profile, report: 
 def run_preflight(git_target: Git, git_source: Git, profile: Profile) -> Report:
     """Полный прогон проверок. Ничего не меняет в репозиториях."""
     report = Report()
+    if not _check_git_version(git_target, report):
+        return report
     if not _check_target_repo(git_target, report):
         return report
     _check_head(git_target, profile, report)
