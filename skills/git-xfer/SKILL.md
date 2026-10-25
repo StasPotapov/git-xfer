@@ -24,8 +24,8 @@ git --version                  # need 2.45 or newer
 ```
 
 Check the git version first. Below 2.45, `git-xfer doctor` and every `apply`
-(same preflight) fail with the line «версия git — X, нужен 2.45+ ради `cherry-pick --empty`»
-(git version is X, 2.45+ is needed for `cherry-pick --empty`). Tell the person
+(same preflight) fail with the line «git version — X, need 2.45+ for `cherry-pick --empty`».
+Tell the person
 to update git (macOS: `brew install git`; Debian/Ubuntu: a newer git from the
 distro backports or the git-core PPA) and stop.
 
@@ -75,7 +75,7 @@ say that a clone is needed for this, and do not clone silently.
 git-xfer status -p <any> --to b    # shows whether the config is read
 ```
 
-No config (`конфиг не найден` — config not found) — create the template and fill it in:
+No config (`config not found`) — create the template and fill it in:
 
 ```bash
 git-xfer init                        # ~/.config/git-xfer/config.toml
@@ -183,8 +183,8 @@ exactly the same way.
 1. **Look at which command it was.** It is in the list above — the cause is found,
    call it another way.
 2. **`git-xfer` itself got stuck** — look into the log (`tail -80 <path from status>`):
-   the last line `git ... → код` (→ exit code) shows which git call it is stuck on.
-   If it says `git не уложился` (git did not finish in time) — the ceiling fired, and the text says on what.
+   the last line `git ... → <code> in <N> s` shows which git call it is stuck on.
+   If it says `git timed out` — the ceiling fired, and the text says on what.
 3. **Long, but not forever.** On a large repository the first `list` computes
    patch-ids over the whole history and can take tens of seconds — this is not a hang
    but work, and the result is cached. If there is no time to wait: `--no-patch-id`
@@ -309,7 +309,7 @@ written in the config: the person works in a feature branch, and the profile say
 `master`. Silently committing "where the config says" is the most painful way
 to ruin someone's day.
 
-`status` prints the line `Ветка цели:` (Target branch:): it shows both what is in the profile
+`status` prints the line `Target branch:`: it shows both what is in the profile
 and what is checked out now. Next — the list of branches, so there is something to
 choose from:
 
@@ -354,7 +354,7 @@ git-xfer list -p <profile> --to <a|b> --target-branch <branch>
 Need a different one for the source too — `--source-branch`; both at once — `-b`.
 
 Branch flags are part of the address: such a transfer has its own `refs/xfer/*`. So
-call `cleanup` with the same flags too, otherwise it says «ссылок не найдено» (no refs found),
+call `cleanup` with the same flags too, otherwise it says «No refs/xfer/* refs found»,
 and `doctor` will then keep mentioning forgotten refs forever. To remove everything at once —
 `git-xfer cleanup --all`.
 
@@ -365,8 +365,8 @@ says the same):
 
 | branch state | what you do |
 |---|---|
-| exists, but `X` is checked out (`doctor`: `сейчас 'X', а нужна 'Y'` — currently 'X', but 'Y' is needed) | confirmation item "I will switch `X` → `Y`, then go back to `X`"; after "yes" — `git -C <target> switch Y`, after the transfer — `switch X` |
-| does not exist (`doctor`: `ветки 'Y' в этом репозитории нет` — there is no branch 'Y' in this repository) | **a separate line** in the confirmation: "branch `Y` does not exist — I will create it from `X`, the transferred commits will be its first"; after "yes" — `git -C <target> switch -c Y`, after the transfer — `switch X` |
+| exists, but `X` is checked out (`doctor`: `on 'X', need 'Y'`) | confirmation item "I will switch `X` → `Y`, then go back to `X`"; after "yes" — `git -C <target> switch Y`, after the transfer — `switch X` |
+| does not exist (`doctor`: `no branch 'Y' in this repository`) | **a separate line** in the confirmation: "branch `Y` does not exist — I will create it from `X`, the transferred commits will be its first"; after "yes" — `git -C <target> switch -c Y`, after the transfer — `switch X` |
 
 Do neither **before** the confirmation — it is someone else's working
 tree. Name the branch creation in the summary separately and directly: a typo in the name
@@ -692,8 +692,8 @@ and with `trailer` on — one trailer per included commit.
 If someone needs it otherwise — the keys `keep_author`, `keep_coauthors`, `trailer` and `squash`
 in the config (one-off: `--keep-author`, `--keep-coauthors`, `--trailer`,
 `--squash`). What is in effect now, `git-xfer status` prints in the lines
-«Сообщение:» (Message:), «Авторство:» (Authorship:)
-and «Схлопывание:» (Squash:); for a started series it shows the series' own options,
+«Message:», «Authorship:»
+and «Squash:»; for a started series it shows the series' own options,
 not the config.
 
 The trailer `(cherry picked from commit ...)` is off for a reason, and there is
@@ -707,7 +707,7 @@ the decision to the person.
 ## Conflicts
 
 The transfer stopped, code `3`. How free you are to fix it yourself is set by the policy
-from the config; `git-xfer status` prints it in the line `Конфликты: <политика>` (Conflicts: <policy>).
+from the config; `git-xfer status` prints it in the line `Conflicts: <policy>`.
 A one-off instruction from the person ("fix it yourself", "touch nothing") overrides the config.
 
 | policy | what you do |
@@ -782,10 +782,10 @@ What not to do:
 | `git: 'xfer' is not a git command` | the tool is not in `PATH` — see section 0 |
 | `command -v git-xfer` is silent after the symlink | `~/.local/bin` is not in `PATH`, tell the person |
 | `attempted relative import with no known parent package` | a package file was run directly; use `python3 -m gitxfer` or `bin/git-xfer` |
-| `нужен Python 3.11 или новее` (Python 3.11 or newer is required) | the `python3` in `PATH` is old; install through `uv`/`pipx` or call `python3.11 -m gitxfer` |
+| `needs Python 3.11 or newer` | the `python3` in `PATH` is old; install through `uv`/`pipx` or call `python3.11 -m gitxfer` |
 | `FileNotFoundError` from `os.getcwd()` | the directory the terminal sits in was deleted or moved — `cd` into an existing one |
-| `конфиг не найден` (config not found) | `git-xfer init` and fill it in, or work through `--source`/`--target` |
-| `не описан ни один профиль` (no profile is defined) | the template is created, but no profiles are written in |
+| `config not found` | `git-xfer init` and fill it in, or work through `--source`/`--target` |
+| `no profiles defined` | the template is created, but no profiles are written in |
 | code `2` on `doctor` | the repository is not ready; the cause is in the output, sort it out with the person |
 
 If you do not understand what happened — **look into the log**, that is what it is for.

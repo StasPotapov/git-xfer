@@ -68,126 +68,126 @@ DEFAULT_RESOLVE = "mechanical"
 _REF_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 CONFIG_TEMPLATE = """\
-# Конфиг git-xfer. Правится руками, утилита его только читает.
+# git-xfer config. Edit it by hand; the tool only reads it.
 #
-# Профиль — это ПАРА репозиториев, а не направление. Направление выбирается
-# в момент вызова: `--to b` тащит из a в b, `--to a` — обратно.
-# Профилей может быть сколько угодно: разные пары, разные ветки одной пары.
+# A profile is a PAIR of repositories, not a direction. You choose the
+# direction when you run the tool: `--to b` moves from a to b, `--to a` back.
+# You can have any number of profiles: different pairs, different branches of one pair.
 
 [defaults]
-# Сколько коммитов источника показывать. Разово — флагом --limit.
+# How many source commits to show. One-off: the --limit flag.
 scan_limit = 30
 
-# Как глубоко читать целевую историю в поисках трейлера
-# (cherry picked from commit ...). Работает, только если трейлер включён
-# (см. trailer ниже) — зато тогда это самый надёжный канал: окно определяет,
-# на сколько своих коммитов назад утилита помнит, что уже переносила.
-# Читается быстро, уменьшать смысла нет.
+# How deep to read the target history when looking for the trailer
+# (cherry picked from commit ...). Works only when the trailer is on
+# (see trailer below), but then it is the most reliable channel: the window
+# sets how many of its own commits back the tool remembers what it transferred.
+# Reading is fast, no point in making it smaller.
 dedup_window = 5000
 
-# Окно сравнения по patch-id — эвристика для пометки ~.
-# Дороже, но результат кэшируется.
+# Window for the patch-id comparison, a heuristic for the ~ mark.
+# More expensive, but the result is cached.
 patchid_window = 1000
 
-# Строка (cherry picked from commit <sha>) в сообщении перенесённого коммита.
-#   false — НЕ дописывать: никакой приписки в конце  ← так по умолчанию
-#   true  — дописывать: в конце сообщения появится эта строка
-# Что стоит за false: трейлер — самый надёжный канал дедупликации, он лежит
-# в самой целевой истории. Без него о том, что коммит уже переносили, утилита
-# знает только из своего state (эта машина, и только в ту сторону, в которую
-# переносили) и по patch-id — эвристике, которая метит коммит значком ≈.
-# Разово, без правки конфига: --trailer / --no-trailer.
+# The line (cherry picked from commit <sha>) in the transferred commit message.
+#   false — do NOT add it: nothing is appended  ← default
+#   true  — add it: this line appears at the end of the message
+# What false costs: the trailer is the most reliable dedup channel, it lives
+# in the target history itself. Without it the tool knows a commit was
+# transferred only from its own state (this machine, and only in the direction
+# you transferred) and by patch-id, a heuristic that marks the commit with ≈.
+# One-off, without editing the config: --trailer / --no-trailer.
 trailer = false
 
-# Схлопывать ли выбранные коммиты в один.
-#   false — НЕ схлопывать: сколько выбрали, столько и приедет  ← по умолчанию
-#   true  — вся выбранная серия становится одним коммитом
-# Сообщение схлопнутого: сообщения серии подряд, либо своё — --message "...".
-# Разово: --squash / --no-squash.
+# Whether to squash the selected commits into one.
+#   false — do NOT squash: as many commits arrive as you selected  ← default
+#   true  — the whole selected series becomes one commit
+# Message of the squashed commit: the series messages in order, or your own: --message "...".
+# One-off: --squash / --no-squash.
 squash = false
 
-# Чьё имя останется в поле author перенесённого коммита.
-#   false — ваше: автор и коммиттер — тот, кто переносит,
-#           author date — момент переноса                   ← так по умолчанию
-#   true  — автора и его дату оставить от исходного коммита
-# Коммиттером (кто применил) в git в любом случае становится тот, кто
-# переносит: это поле настройки не имеет.
-# Разово: --keep-author / --reset-author.
+# Whose name stays in the author field of the transferred commit.
+#   false — yours: author and committer are the person who transfers,
+#           author date is the time of the transfer           ← default
+#   true  — keep the author and author date of the original commit
+# git always makes the person who transfers the committer (who applied it):
+# that field has no setting.
+# One-off: --keep-author / --reset-author.
 keep_author = false
 
-# Строки «Co-authored-by: …» в сообщении перенесённого коммита.
-#   false — вырезать: соавторы исходного коммита не едут      ← по умолчанию
-#   true  — оставить сообщение как есть
-# Разово: --keep-coauthors / --strip-coauthors.
+# The "Co-authored-by: …" lines in the transferred commit message.
+#   false — strip them: co-authors of the original commit are not carried  ← default
+#   true  — keep the message as is
+# One-off: --keep-coauthors / --strip-coauthors.
 keep_coauthors = false
 
-# Потолок на один вызов git, секунды. Страховка от зависания: git, севший
-# ждать ввода (редактор, пейджер, запрос пароля), иначе держит утилиту вечно.
-#   600 — прервать вызов, который длится дольше десяти минут  ← по умолчанию
-#   0   — не ограничивать
+# Limit for one git call, in seconds. Protects from hangs: git waiting
+# for input (editor, pager, password prompt) would hold the tool forever.
+#   600 — stop a call that runs longer than ten minutes  ← default
+#   0   — no limit
 git_timeout = 600
 
-# Журнал прогонов: что запускалось, с каким кодом и где встало.
-# Лежит рядом со state, вне рабочих репозиториев, в git не попадает.
-# Посмотреть путь: git-xfer status
+# Run log: what ran, with what exit code, and where it stopped.
+# Lives next to the state, outside the working repositories, never gets into git.
+# To see the path: git-xfer status
 log = true
 # log_file = "~/.local/state/git-xfer/git-xfer.log"
 
-# Какие коммиты по умолчанию НЕ переносить — служебные, черновики, чужое.
-# Такой коммит остаётся в списке с пометкой ×, но в выбор `all` не попадает,
-# а названный явно требует подтверждения (без терминала — флага
-# --include-skipped). Правила профиля ([profiles.<имя>.skip]) добавляются
-# к этим, а не заменяют их. Все три ключа необязательны.
-#   subject — регэкспы по заголовку коммита (re.search); (?i) — без учёта регистра
-#   commits — хеши коммитов источника, можно сокращённые
-#   paths   — маски путей относительно корня проекта; коммит исключается,
-#             только если под них подходят ВСЕ его файлы. * проходит и через /
+# Which commits NOT to transfer by default: service commits, drafts, other people's.
+# Such a commit stays in the list with the × mark but is not included in `all`;
+# naming it explicitly needs confirmation (without a terminal, the
+# --include-skipped flag). Profile rules ([profiles.<name>.skip]) are added
+# to these, they do not replace them. All three keys are optional.
+#   subject — regexps on the commit subject (re.search); (?i) ignores case
+#   commits — source commit hashes, short ones are fine
+#   paths   — path masks relative to the project root; a commit is excluded
+#             only if ALL its files match. * also matches /
 # [defaults.skip]
-# subject = ["(?i)служебн", "^wip\\\\b"]
+# subject = ["(?i)^chore", "^wip\\\\b"]
 # commits = ["a1b2c3d"]
 # paths = ["*.lock", ".idea/*"]
 
 [agent]
-# Насколько самостоятельно агент (скилл git-xfer для Claude Code) разбирает
-# конфликты. Читает это скилл; сама утилита по ней ничего не делает, только
-# проверяет значение и показывает его в `git-xfer status`.
-#   "ask"        — не правит ничего сам, только показывает суть и предлагает
-#   "mechanical" — сам чинит механические конфликты (импорты, соседние
-#                  строки, форматирование, сгенерённое) и показывает, что
-#                  сделал; смысловые обязательно выносит на решение человеку
-#   "auto"       — разбирает всё сам, включая смысловые, и отчитывается
-#                  постфактум. Ошибка тут уезжает коммитом в рабочий
-#                  репозиторий, так что включайте осознанно
+# How independently the agent (the git-xfer skill for Claude Code) resolves
+# conflicts. The skill reads this; the tool itself does nothing with it, it only
+# checks the value and shows it in `git-xfer status`.
+#   "ask"        — changes nothing itself, only shows the gist and suggests
+#   "mechanical" — fixes mechanical conflicts itself (imports, adjacent
+#                  lines, formatting, generated code) and shows what it
+#                  did; always leaves conflicts of meaning to a human
+#   "auto"       — resolves everything itself, conflicts of meaning too, and
+#                  reports afterwards. A mistake here lands as a commit in a
+#                  working repository, so turn it on knowingly
 resolve_conflicts = "mechanical"
 
 # [profiles.myproj]
 # a = "/path/to/repo-a"
 # b = "/path/to/repo-b"
-# branch = "master"        # одна ветка с обеих сторон
+# branch = "master"        # one branch on both sides
 #
 # trailer, keep_author, keep_coauthors, squash, scan_limit, dedup_window
-# и patchid_window можно переопределить внутри профиля.
-# Свои правила skip — в [profiles.myproj.skip]: они добавляются к общим.
+# and patchid_window can be overridden inside a profile.
+# Profile skip rules go in [profiles.myproj.skip]: they add to the shared ones.
 #
-# [profiles.myproj-release]  # та же пара, другие ветки
+# [profiles.myproj-release]  # same pair, other branches
 # a = "/path/to/repo-a"
 # b = "/path/to/repo-b"
-# a_branch = "release/1.x"   # если ветки называются по-разному
+# a_branch = "release/1.x"   # if the branches have different names
 # b_branch = "stable"
-# --- Проект живёт в подкаталоге одного из репозиториев -------------------
-# Путь стороны — ВСЕГДА корень репозитория; подкаталог задаётся отдельным
-# ключом <сторона>_prefix. При переносе пути переписываются: снимается
-# префикс источника, надевается префикс цели.
+# --- The project lives in a subdirectory of one of the repositories ------
+# A side path is ALWAYS the repository root; the subdirectory is set with
+# a separate key <side>_prefix. Paths are rewritten on transfer: the source
+# prefix is removed, the target prefix is added.
 #
 # [profiles.myapp]
 # a = "/path/to/monorepo"
-# a_prefix = "apps/mobile"       # относительно корня репо, без слеша впереди
-# b = "/path/to/personal-repo"   # тут проект в корне — b_prefix не нужен
+# a_prefix = "apps/mobile"       # relative to the repo root, no leading slash
+# b = "/path/to/personal-repo"   # here the project is at the root, no b_prefix needed
 # branch = "master"
 #
-# Коммит, не задевший подкаталог, в список не попадает вовсе. Коммит,
-# задевший и подкаталог, и файлы вне него, переносится ЧАСТИЧНО (только
-# внутренняя часть) и помечен в списке звёздочкой: + *
+# A commit that does not touch the subdirectory is not listed at all. A commit
+# that touches both the subdirectory and files outside it is transferred
+# PARTIALLY (only the inside part) and marked with an asterisk in the list: + *
 """
 
 def _xdg_dir(var: str, fallback: str) -> Path:
@@ -204,21 +204,21 @@ def config_path() -> Path:
     return config_dir() / "config.toml"
 
 
-def normalize_prefix(raw: str | None, where: str = "префикс") -> str:
+def normalize_prefix(raw: str | None, where: str = "prefix") -> str:
     """`"./a/b/"` → `"a/b"`. Абсолютный путь и `..` — ошибка конфига."""
     if raw is None or not str(raw).strip():
         return ""
     text = str(raw).strip().replace("\\", "/")
     if text.startswith("/"):
         raise ConfigError(
-            f"{where}: нужен путь внутри репозитория, а не абсолютный ({raw!r})"
+            f"{where}: need a path inside the repository, not an absolute one ({raw!r})"
         )
     parts = []
     for part in text.split("/"):
         if part in ("", "."):
             continue
         if part == "..":
-            raise ConfigError(f"{where}: '..' в пути не допускается ({raw!r})")
+            raise ConfigError(f"{where}: '..' is not allowed in the path ({raw!r})")
         parts.append(part)
     return "/".join(parts)
 
@@ -264,13 +264,13 @@ class SkipRules:
         sha = sha.lower()
         for prefix in self.commits:
             if sha.startswith(prefix):
-                return f"хеш в skip.commits ({prefix})"
+                return f"hash in skip.commits ({prefix})"
         for pattern in self.subject:
             if pattern.search(subject):
-                return f"заголовок: {pattern.pattern}"
+                return f"subject: {pattern.pattern}"
         if self.paths and files:
             if all(any(fnmatch.fnmatchcase(path, glob) for glob in self.paths) for path in files):
-                return "только файлы из skip.paths"
+                return "only files from skip.paths"
         return ""
 
 
@@ -281,14 +281,14 @@ def _parse_skip(table: object, where: str) -> SkipRules:
     # «[defaults]» → «[defaults.skip]»: так секцию и ищут глазами в файле.
     where = f"{where[:-1]}.skip]" if where.endswith("]") else f"{where}.skip"
     if not isinstance(table, dict):
-        raise ConfigError(f"{where}: должна быть таблицей")
+        raise ConfigError(f"{where}: must be a table")
     unknown = sorted(set(table) - {"subject", "commits", "paths"})
     if unknown:
         # Опечатка в ключе молча выключила бы правило — ровно то, от чего
         # правило и заводили.
         raise ConfigError(
-            f"{where}: неизвестные ключи {', '.join(unknown)}; "
-            "бывают subject, commits, paths"
+            f"{where}: unknown keys {', '.join(unknown)}; "
+            "allowed: subject, commits, paths"
         )
 
     def strings(key: str) -> list[str]:
@@ -299,7 +299,7 @@ def _parse_skip(table: object, where: str) -> SkipRules:
         if not isinstance(value, list) or not all(
             isinstance(item, str) and item.strip() for item in value
         ):
-            raise ConfigError(f"{where}: {key!r} должен быть списком непустых строк")
+            raise ConfigError(f"{where}: {key!r} must be a list of non-empty strings")
         return list(value)
 
     subject: list[re.Pattern[str]] = []
@@ -307,11 +307,11 @@ def _parse_skip(table: object, where: str) -> SkipRules:
         try:
             subject.append(re.compile(raw))
         except re.error as exc:
-            raise ConfigError(f"{where}: регэксп {raw!r} не разбирается — {exc}") from None
+            raise ConfigError(f"{where}: cannot parse regexp {raw!r}: {exc}") from None
     commits: list[str] = []
     for raw in (item.strip() for item in strings("commits")):
         if not re.fullmatch(r"[0-9a-fA-F]{4,64}", raw):
-            raise ConfigError(f"{where}: {raw!r} в 'commits' — не хеш коммита")
+            raise ConfigError(f"{where}: {raw!r} in 'commits' is not a commit hash")
         commits.append(raw.lower())
     paths = [raw.strip().lstrip("/") for raw in strings("paths")]
     return SkipRules(subject=tuple(subject), commits=tuple(commits), paths=tuple(paths))
@@ -429,7 +429,7 @@ class Pair:
 
     def side(self, key: str) -> Side:
         if key not in ("a", "b"):
-            raise ConfigError(f"сторона может быть только 'a' или 'b', а не {key!r}")
+            raise ConfigError(f"side must be 'a' or 'b', not {key!r}")
         return self.a if key == "a" else self.b
 
     def direction(self, to: str) -> Profile:
@@ -475,34 +475,34 @@ class Config:
             if len(self.profiles) == 1:
                 return next(iter(self.profiles.values()))
             raise ConfigError(
-                "не указан профиль (-p/--profile). Доступны: "
-                + (", ".join(sorted(self.profiles)) or "ни одного")
+                "no profile given (-p/--profile). Available: "
+                + (", ".join(sorted(self.profiles)) or "none")
             )
         try:
             return self.profiles[name]
         except KeyError:
-            known = ", ".join(sorted(self.profiles)) or "ни одного"
-            raise ConfigError(f"профиль {name!r} не найден. Доступны: {known}") from None
+            known = ", ".join(sorted(self.profiles)) or "none"
+            raise ConfigError(f"profile {name!r} not found. Available: {known}") from None
 
 
 def _require_str(table: dict, key: str, where: str) -> str:
     value = table.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"{where}: нужен непустой строковый ключ {key!r}")
+        raise ConfigError(f"{where}: need a non-empty string key {key!r}")
     return value.strip()
 
 
 def _require_int(table: dict, key: str, where: str, default: int) -> int:
     value = table.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ConfigError(f"{where}: {key!r} должен быть целым числом больше нуля")
+        raise ConfigError(f"{where}: {key!r} must be an integer greater than zero")
     return value
 
 
 def _require_bool(table: dict, key: str, where: str, default: bool) -> bool:
     value = table.get(key, default)
     if not isinstance(value, bool):
-        raise ConfigError(f"{where}: {key!r} должен быть true или false")
+        raise ConfigError(f"{where}: {key!r} must be true or false")
     return value
 
 
@@ -511,7 +511,7 @@ def _require_timeout(table: dict, key: str, where: str, default: int) -> int:
     value = table.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ConfigError(
-            f"{where}: {key!r} должен быть целым числом секунд (0 — без ограничения)"
+            f"{where}: {key!r} must be an integer number of seconds (0 means no limit)"
         )
     return value
 
@@ -600,8 +600,8 @@ def _parse_pair(
     old_style = "source" in table or "target" in table
     if new_style and old_style:
         raise ConfigError(
-            f"{where}: смешаны два формата. Либо a/b (пара репозиториев),"
-            " либо source/target (старый формат с зашитым направлением)"
+            f"{where}: two formats are mixed. Use either a/b (a pair of repositories),"
+            " or source/target (the old format with a fixed direction)"
         )
     if old_style:
         # Старый формат — та же пара, просто стороны назывались source и target.
@@ -614,20 +614,20 @@ def _parse_pair(
     elif new_style:
         shared = table.get("branch")
         if shared is not None and (not isinstance(shared, str) or not shared.strip()):
-            raise ConfigError(f"{where}: 'branch' должен быть непустой строкой")
+            raise ConfigError(f"{where}: 'branch' must be a non-empty string")
         sides = []
         for key in ("a", "b"):
             path = Path(_require_str(table, key, where)).expanduser()
             branch = table.get(f"{key}_branch") or shared
             if not isinstance(branch, str) or not branch.strip():
                 raise ConfigError(
-                    f"{where}: не задана ветка для стороны {key!r}."
-                    " Укажите 'branch' для обеих сторон или"
-                    f" '{key}_branch' отдельно"
+                    f"{where}: no branch for side {key!r}."
+                    " Set 'branch' for both sides or"
+                    f" '{key}_branch' separately"
                 )
             raw_prefix = table.get(f"{key}_prefix")
             if raw_prefix is not None and not isinstance(raw_prefix, str):
-                raise ConfigError(f"{where}: '{key}_prefix' должен быть строкой")
+                raise ConfigError(f"{where}: '{key}_prefix' must be a string")
             sides.append(
                 Side(
                     key,
@@ -639,7 +639,7 @@ def _parse_pair(
         a, b = sides
     else:
         raise ConfigError(
-            f"{where}: нужны ключи 'a' и 'b' — пути к двум репозиториям пары"
+            f"{where}: need keys 'a' and 'b', the paths to the two repositories of the pair"
         )
     return Pair(
         name=name,
@@ -662,35 +662,35 @@ def load_config(path: Path | None = None) -> Config:
     path = Path(path).expanduser() if path else config_path()
     if not path.exists():
         raise ConfigError(
-            f"конфиг не найден: {path}\nСоздайте шаблон командой: git-xfer init"
+            f"config not found: {path}\nCreate a template with: git-xfer init"
         )
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{path}: не разбирается как TOML — {exc}") from None
+        raise ConfigError(f"{path}: cannot parse as TOML: {exc}") from None
     except OSError as exc:
-        raise ConfigError(f"{path}: не читается — {exc}") from None
+        raise ConfigError(f"{path}: cannot read: {exc}") from None
 
     defaults = data.get("defaults") or {}
     if not isinstance(defaults, dict):
-        raise ConfigError(f"{path}: секция [defaults] должна быть таблицей")
+        raise ConfigError(f"{path}: section [defaults] must be a table")
     log_enabled = defaults.get("log", True)
     if not isinstance(log_enabled, bool):
-        raise ConfigError("[defaults]: 'log' должен быть true или false")
+        raise ConfigError("[defaults]: 'log' must be true or false")
     raw_log_file = defaults.get("log_file")
     if raw_log_file is not None and (not isinstance(raw_log_file, str) or not raw_log_file.strip()):
-        raise ConfigError("[defaults]: 'log_file' должен быть непустой строкой")
+        raise ConfigError("[defaults]: 'log_file' must be a non-empty string")
     log_file = Path(raw_log_file).expanduser() if raw_log_file else None
 
     agent = data.get("agent") or {}
     if not isinstance(agent, dict):
-        raise ConfigError(f"{path}: секция [agent] должна быть таблицей")
+        raise ConfigError(f"{path}: section [agent] must be a table")
     resolve = agent.get("resolve_conflicts", DEFAULT_RESOLVE)
     if resolve not in RESOLVE_POLICIES:
         raise ConfigError(
-            "[agent]: 'resolve_conflicts' должен быть одним из "
+            "[agent]: 'resolve_conflicts' must be one of "
             + ", ".join(repr(x) for x in RESOLVE_POLICIES)
-            + f", а не {resolve!r}"
+            + f", not {resolve!r}"
         )
 
     scan_limit = _require_int(defaults, "scan_limit", "[defaults]", DEFAULT_SCAN_LIMIT)
@@ -707,13 +707,13 @@ def load_config(path: Path | None = None) -> Config:
 
     raw_profiles = data.get("profiles") or {}
     if not isinstance(raw_profiles, dict):
-        raise ConfigError(f"{path}: секция [profiles] должна быть таблицей")
+        raise ConfigError(f"{path}: section [profiles] must be a table")
 
     profiles: dict[str, Pair] = {}
     for name, table in raw_profiles.items():
         where = f"[profiles.{name}]"
         if not isinstance(table, dict):
-            raise ConfigError(f"{where}: должен быть таблицей")
+            raise ConfigError(f"{where}: must be a table")
         profiles[name] = _parse_pair(
             name,
             table,
@@ -728,7 +728,7 @@ def load_config(path: Path | None = None) -> Config:
             skip=skip,
         )
     if not profiles:
-        raise ConfigError(f"{path}: не описан ни один профиль [profiles.<имя>]")
+        raise ConfigError(f"{path}: no profiles defined [profiles.<name>]")
     return Config(
         path=path,
         profiles=profiles,

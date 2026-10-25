@@ -62,7 +62,7 @@
 
 Нужен Python ≥ 3.11 (ради `tomllib`) и git ≥ 2.45 (ради `cherry-pick --empty`).
 `git-xfer doctor` и каждый `apply` (он прогоняет те же предполётные проверки)
-первым делом сверяют версию git и на старом git падают с `версия git — X, нужен 2.45+`.
+первым делом сверяют версию git и на старом git падают с ``git version — X, need 2.45+ for `cherry-pick --empty` ``.
 Сторонних зависимостей нет — только стандартная библиотека.
 
 ```bash
@@ -137,7 +137,7 @@ PYTHONPATH=~/tools/git-xfer python3 -m gitxfer list -p myproj --to b
 файл пакета напрямую (`python3 gitxfer/cli.py`). Так нельзя. Свежие версии
 на это отвечают подсказкой вместо трейсбека.
 
-**`нужен Python 3.11 или новее`** — `python3` в `PATH` слишком старый
+**`needs Python 3.11 or newer`** — `python3` в `PATH` слишком старый
 (на macOS системный обычно 3.9). Ставьте через `uv`/`pipx`, они
 фиксируют интерпретатор, либо зовите `python3.11 -m gitxfer …`.
 
@@ -245,8 +245,8 @@ keep_coauthors = true  # строки Co-authored-by остаются в соо�
 
 Разово, без правки конфига: `--trailer` / `--no-trailer`,
 `--keep-author` / `--reset-author`, `--keep-coauthors` / `--strip-coauthors`.
-Что действует сейчас, показывает `git-xfer status` строками «Сообщение:»
-и «Авторство:» — а если серия уже
+Что действует сейчас, показывает `git-xfer status` строками «Message:»
+и «Authorship:» — а если серия уже
 начата, он показывает её собственные опции: доигрывается она теми, с которыми
 начиналась.
 
@@ -453,7 +453,7 @@ git-xfer status -p myproj --to b          # в профиле master, выгру
 git-xfer apply -p myproj --to b --target-branch feature/login --commits 1 --yes
 ```
 
-Строку `Ветка цели:` печатает `status`: в ней видно и то, что записано
+Строку `Target branch:` печатает `status`: в ней видно и то, что записано
 в профиле, и то, что выгружено на самом деле. Если они разошлись, `doctor`
 и `apply` остановятся с кодом `2` и ничего не тронут — переключитесь сами
 или назовите выгруженную ветку флагом. Ветки нет вовсе — `doctor` скажет
@@ -494,16 +494,16 @@ git-xfer apply -p myproj --to b --target-branch feature/login --commits 1 --yes
 
 ```console
 $ git-xfer apply
-Профиль:
+Profile:
   1. myproj
      /Users/me/dev/repo-a ↔ /Users/me/dev/repo-b  (master)
   2. myproj-release
      /Users/me/dev/repo-a ↔ /Users/me/dev/repo-b  (release/1.x / stable)
-  выбор [1]: 1
-Куда переносим:
+  choice [1]: 1
+Transfer direction:
   1. /Users/me/dev/repo-a (master)  →  /Users/me/dev/repo-b (master)
   2. /Users/me/dev/repo-b (master)  →  /Users/me/dev/repo-a (master)
-  выбор [1]: 1
+  choice [1]: 1
 ```
 
 Дальше показывается, что можно взять:
@@ -516,8 +516,8 @@ $ git-xfer apply
  5 ≈ bacc39d 2024-02-03 Ann Source общая правка: shared.txt
  6 + f62bac9 2024-02-02 Ann Source fix: правка app (конфликтует)
 
-  + новый: 5   ≈ совпал patch-id: 1   − уже перенесён: 0   (страница 1/1, коммитов 6)
-Выбор [1,3,5-7 | all | !N | /текст — фильтр | n/p — страница | q — отмена]: 3,4
+  + new: 5   ≈ same patch-id: 1   − already transferred: 0   (page 1/1, 6 commits)
+Select [1,3,5-7 | all | !N | /text filter | n/p page | q cancel]: 3,4
 ```
 
 Пустой ввод — **отмена**, не «выбрать всё». Весь ввод проверяется целиком
@@ -527,18 +527,18 @@ $ git-xfer apply
 список идёт newest-first, как `git log`, а применяется наоборот:
 
 ```console
-Порядок применения (old → new), коммитов: 2
+Apply order (old → new), commits: 2
     1. 47c2151 chore: бинарный ассет
     2. a2c0b9a docs: переименование и правка
-Перенести 2 коммит(ов)? [y/N]: y
+Transfer 2 commit(s)? [y/N]: y
 
 [1/2] 47c2151da5f9 chore: бинарный ассет
 [2/2] a2c0b9af6e39 docs: переименование и правка
 
-Перенесено: 2; пусто: 0; пропущено: 0
+Transferred: 2; empty: 0; skipped: 0
 ```
 
-Обратно — то же самое, на шаге «Куда переносим» выбираете второй пункт.
+Обратно — то же самое, на шаге «Transfer direction:» выбираете второй пункт.
 Перенесённое утилита узнаёт с обеих сторон и по кругу не гоняет:
 
 ```console
@@ -547,7 +547,7 @@ $ git-xfer list -p myproj --to a
  2 − 7c72adc 2024-02-04 Ann Source chore: бинарный ассет
  3 + 758dd2e 2024-02-10 Bob Target target: правка app
 
-  + новый: 1   ≈ совпал patch-id: 0   − уже перенесён: 2
+  + new: 1   ≈ same patch-id: 0   − already transferred: 2
 ```
 
 Полный цикл одной стороны, если нужны все шаги явно:

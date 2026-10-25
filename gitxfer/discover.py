@@ -28,12 +28,12 @@ PARTIAL = "*"
 SKIPPED = "×"
 
 STATUS_HINT = {
-    NEW: "новый",
-    SIMILAR: "совпал patch-id",
-    TRANSFERRED: "уже перенесён",
+    NEW: "new",
+    SIMILAR: "same patch-id",
+    TRANSFERRED: "already transferred",
 }
-PARTIAL_HINT = "задевает файлы вне подкаталога — приедет только часть"
-SKIPPED_HINT = "не переносим по правилам skip"
+PARTIAL_HINT = "touches files outside the subdirectory, only part will arrive"
+SKIPPED_HINT = "excluded by skip rules"
 
 LOG_FORMAT = US.join(["%H", "%h", "%ad", "%an", "%s"]) + RS
 
@@ -409,15 +409,15 @@ def survey(
             None,
         )
         if sha in picked_here or any(sha.startswith(prefix) for prefix in picked_short):
-            status, reason = TRANSFERRED, "трейлер в целевой истории"
+            status, reason = TRANSFERRED, "trailer in target history"
         elif origin:
-            status, reason = TRANSFERRED, f"списан с {origin[:12]}, он уже в цели"
+            status, reason = TRANSFERRED, f"copied from {origin[:12]}, which is already in the target"
         elif mapped.get(commit.sha) and target_shas.match(mapped[commit.sha]):
-            status, reason = TRANSFERRED, f"перенесён как {mapped[commit.sha][:12]}"
+            status, reason = TRANSFERRED, f"transferred as {mapped[commit.sha][:12]}"
         else:
             pid = source_pids.get(commit.sha)
             if pid and pid in known_pids:
-                status, reason = SIMILAR, f"patch-id как у {known_pids[pid][:12]}"
+                status, reason = SIMILAR, f"same patch-id as {known_pids[pid][:12]}"
         rows.append(
             Row(
                 number=number,

@@ -51,7 +51,7 @@ def setup(*, enabled: bool = True, file: Path | None = None) -> Path | None:
         )
     except OSError as exc:
         # Журнал — удобство, а не условие работы: не смогли — молча без него.
-        print(f"git-xfer: журнал не ведётся ({target}: {exc})", file=sys.stderr)
+        print(f"git-xfer: log is off ({target}: {exc})", file=sys.stderr)
         return None
     handler.setFormatter(
         logging.Formatter(
@@ -101,7 +101,7 @@ def safe_cwd() -> str:
     try:
         return os.getcwd()
     except OSError:
-        return "<каталога больше нет>"
+        return "<directory no longer exists>"
 
 
 def run_header(argv: list[str], version: str) -> None:

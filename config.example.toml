@@ -1,108 +1,108 @@
-# Пример конфига git-xfer.
-# Рабочее место: ~/.config/git-xfer/config.toml (учитывается XDG_CONFIG_HOME).
-# Создать шаблон на месте: git-xfer init
+# git-xfer config example.
+# Working location: ~/.config/git-xfer/config.toml (XDG_CONFIG_HOME is respected).
+# Create a template in place: git-xfer init
 #
-# Профиль — это ПАРА репозиториев, а не направление. Направление выбирается
-# в момент вызова: `--to b` тащит из a в b, `--to a` — обратно, без флага
-# в терминале спросит. Поэтому на пару нужен один профиль, а не два.
+# A profile is a PAIR of repositories, not a direction. You choose the
+# direction when you run the tool: `--to b` moves from a to b, `--to a` back;
+# without the flag it asks in a terminal. So a pair needs one profile, not two.
 
 [defaults]
-# Сколько коммитов источника показывать. Разово — флагом --limit.
+# How many source commits to show. One-off: the --limit flag.
 scan_limit = 30
 
-# Как глубоко читать целевую историю в поисках трейлера
-# (cherry picked from commit ...). Работает, только если трейлер включён
-# (см. trailer ниже) — зато тогда это самый надёжный канал дедупликации:
-# окно определяет, на сколько своих коммитов назад утилита помнит,
-# что уже переносила. Читается быстро, уменьшать смысла нет.
+# How deep to read the target history when looking for the trailer
+# (cherry picked from commit ...). Works only when the trailer is on
+# (see trailer below), but then it is the most reliable channel: the window
+# sets how many of its own commits back the tool remembers what it transferred.
+# Reading is fast, no point in making it smaller.
 dedup_window = 5000
 
-# Окно сравнения по patch-id — эвристика для пометки ~.
-# Дороже, но результат кэшируется в state.
+# Window for the patch-id comparison, a heuristic for the ~ mark.
+# More expensive, but the result is cached in the state.
 patchid_window = 1000
 
-# Строка (cherry picked from commit <sha>) в сообщении перенесённого коммита.
-#   false — НЕ дописывать: никакой приписки в конце  ← так по умолчанию
-#   true  — дописывать: в конце сообщения появится эта строка
-# Что стоит за false: трейлер — самый надёжный канал дедупликации, он лежит
-# в самой целевой истории. Без него о том, что коммит уже переносили, утилита
-# знает только из своего state (эта машина, и только в ту сторону, в которую
-# переносили) и по patch-id — эвристике, которая метит коммит значком ≈.
-# Разово, без правки конфига: --trailer / --no-trailer.
+# The line (cherry picked from commit <sha>) in the transferred commit message.
+#   false — do NOT add it: nothing is appended  ← default
+#   true  — add it: this line appears at the end of the message
+# What false costs: the trailer is the most reliable dedup channel, it lives
+# in the target history itself. Without it the tool knows a commit was
+# transferred only from its own state (this machine, and only in the direction
+# you transferred) and by patch-id, a heuristic that marks the commit with ≈.
+# One-off, without editing the config: --trailer / --no-trailer.
 trailer = false
 
-# Схлопывать ли выбранные коммиты в один.
-#   false — НЕ схлопывать: сколько выбрали, столько и приедет  ← по умолчанию
-#   true  — вся выбранная серия становится одним коммитом
-# Сообщение схлопнутого: сообщения серии подряд, либо своё — --message "...".
-# Разово: --squash / --no-squash.
+# Whether to squash the selected commits into one.
+#   false — do NOT squash: as many commits arrive as you selected  ← default
+#   true  — the whole selected series becomes one commit
+# Message of the squashed commit: the series messages in order, or your own: --message "...".
+# One-off: --squash / --no-squash.
 squash = false
 
-# Чьё имя останется в поле author перенесённого коммита.
-#   false — ваше: автор и коммиттер — тот, кто переносит,
-#           author date — момент переноса                   ← так по умолчанию
-#   true  — автора и его дату оставить от исходного коммита
-# Коммиттером (кто применил) в git в любом случае становится тот, кто
-# переносит: это поле настройки не имеет.
-# Разово: --keep-author / --reset-author.
+# Whose name stays in the author field of the transferred commit.
+#   false — yours: author and committer are the person who transfers,
+#           author date is the time of the transfer           ← default
+#   true  — keep the author and author date of the original commit
+# git always makes the person who transfers the committer (who applied it):
+# that field has no setting.
+# One-off: --keep-author / --reset-author.
 keep_author = false
 
-# Строки «Co-authored-by: …» в сообщении перенесённого коммита.
-#   false — вырезать: соавторы исходного коммита не едут      ← по умолчанию
-#   true  — оставить сообщение как есть
-# Разово: --keep-coauthors / --strip-coauthors.
+# The "Co-authored-by: …" lines in the transferred commit message.
+#   false — strip them: co-authors of the original commit are not carried  ← default
+#   true  — keep the message as is
+# One-off: --keep-coauthors / --strip-coauthors.
 keep_coauthors = false
 
-# Потолок на один вызов git, секунды. Страховка от зависания: git, севший
-# ждать ввода (редактор, пейджер, запрос пароля), иначе держит утилиту вечно.
-#   600 — прервать вызов, который длится дольше десяти минут  ← по умолчанию
-#   0   — не ограничивать
+# Limit for one git call, in seconds. Protects from hangs: git waiting
+# for input (editor, pager, password prompt) would hold the tool forever.
+#   600 — stop a call that runs longer than ten minutes  ← default
+#   0   — no limit
 git_timeout = 600
 
-# Журнал прогонов: что запускалось, с каким кодом и где встало.
-# Лежит рядом со state, вне рабочих репозиториев, в git не попадает.
-# Посмотреть путь: git-xfer status
+# Run log: what ran, with what exit code, and where it stopped.
+# Lives next to the state, outside the working repositories, never gets into git.
+# To see the path: git-xfer status
 log = true
 # log_file = "~/.local/state/git-xfer/git-xfer.log"
 
-# Какие коммиты по умолчанию НЕ переносить — служебные, черновики, чужое.
-# Такой коммит остаётся в списке с пометкой ×, но в выбор `all` не попадает,
-# а названный явно требует подтверждения (без терминала — флага
-# --include-skipped). Правила профиля ([profiles.<имя>.skip]) добавляются
-# к этим, а не заменяют их. Все три ключа необязательны.
-#   subject — регэкспы по заголовку коммита (re.search); (?i) — без учёта регистра
-#   commits — хеши коммитов источника, можно сокращённые
-#   paths   — маски путей относительно корня проекта; коммит исключается,
-#             только если под них подходят ВСЕ его файлы. * проходит и через /
+# Which commits NOT to transfer by default: service commits, drafts, other people's.
+# Such a commit stays in the list with the × mark but is not included in `all`;
+# naming it explicitly needs confirmation (without a terminal, the
+# --include-skipped flag). Profile rules ([profiles.<name>.skip]) are added
+# to these, they do not replace them. All three keys are optional.
+#   subject — regexps on the commit subject (re.search); (?i) ignores case
+#   commits — source commit hashes, short ones are fine
+#   paths   — path masks relative to the project root; a commit is excluded
+#             only if ALL its files match. * also matches /
 # [defaults.skip]
-# subject = ["(?i)служебн", "^wip\\b"]
+# subject = ["(?i)^chore", "^wip\\b"]
 # commits = ["a1b2c3d"]
 # paths = ["*.lock", ".idea/*"]
 
 [agent]
-# Насколько самостоятельно агент (скилл git-xfer для Claude Code) разбирает
-# конфликты. Читает это скилл; сама утилита по ней ничего не делает, только
-# проверяет значение и показывает его в `git-xfer status`.
-#   "ask"        — не правит ничего сам, только показывает суть и предлагает
-#   "mechanical" — сам чинит механические конфликты (импорты, соседние
-#                  строки, форматирование, сгенерённое) и показывает, что
-#                  сделал; смысловые обязательно выносит на решение человеку
-#   "auto"       — разбирает всё сам, включая смысловые, и отчитывается
-#                  постфактум. Ошибка тут уезжает коммитом в рабочий
-#                  репозиторий, так что включайте осознанно
+# How independently the agent (the git-xfer skill for Claude Code) resolves
+# conflicts. The skill reads this; the tool itself does nothing with it, it only
+# checks the value and shows it in `git-xfer status`.
+#   "ask"        — changes nothing itself, only shows the gist and suggests
+#   "mechanical" — fixes mechanical conflicts itself (imports, adjacent
+#                  lines, formatting, generated code) and shows what it
+#                  did; always leaves conflicts of meaning to a human
+#   "auto"       — resolves everything itself, conflicts of meaning too, and
+#                  reports afterwards. A mistake here lands as a commit in a
+#                  working repository, so turn it on knowingly
 resolve_conflicts = "mechanical"
 
 [profiles.myproj]
 a = "/path/to/repo-a"
 b = "/path/to/repo-b"
-branch = "master"            # одна ветка с обеих сторон
+branch = "master"            # one branch on both sides
 
-[profiles.myproj-release]    # та же пара, другие ветки
+[profiles.myproj-release]    # same pair, other branches
 a = "/path/to/repo-a"
 b = "/path/to/repo-b"
-a_branch = "release/1.x"     # если ветки называются по-разному
+a_branch = "release/1.x"     # if the branches have different names
 b_branch = "stable"
-# Значения из [defaults] можно переопределить внутри профиля:
+# Values from [defaults] can be overridden inside a profile:
 # trailer = true
 # squash = true
 # keep_author = true
@@ -111,26 +111,26 @@ b_branch = "stable"
 # dedup_window = 2000
 # patchid_window = 500
 #
-# Свои правила skip профиля добавляются к общим из [defaults.skip]:
+# Profile skip rules add to the shared ones from [defaults.skip]:
 # [profiles.myproj-release.skip]
 # subject = ["^chore\\(ci\\)"]
 
-# --- Проект живёт в подкаталоге одного из репозиториев -------------------
-# Путь стороны — ВСЕГДА корень репозитория; подкаталог задаётся отдельным
-# ключом <сторона>_prefix. При переносе пути переписываются: снимается
-# префикс источника, надевается префикс цели.
+# --- The project lives in a subdirectory of one of the repositories ------
+# A side path is ALWAYS the repository root; the subdirectory is set with
+# a separate key <side>_prefix. Paths are rewritten on transfer: the source
+# prefix is removed, the target prefix is added.
 #
 # [profiles.myapp]
 # a = "/path/to/monorepo"
-# a_prefix = "apps/mobile"       # относительно корня репо, без слеша впереди
-# b = "/path/to/personal-repo"   # тут проект в корне — b_prefix не нужен
+# a_prefix = "apps/mobile"       # relative to the repo root, no leading slash
+# b = "/path/to/personal-repo"   # here the project is at the root, no b_prefix needed
 # branch = "master"
 #
-# Коммит, не задевший подкаталог, в список не попадает вовсе. Коммит,
-# задевший и подкаталог, и файлы вне него, переносится ЧАСТИЧНО (только
-# внутренняя часть) и помечен в списке звёздочкой: + *
+# A commit that does not touch the subdirectory is not listed at all. A commit
+# that touches both the subdirectory and files outside it is transferred
+# PARTIALLY (only the inside part) and marked with an asterisk in the list: + *
 
-# Разовую ветку описывать профилем не нужно — есть флаги:
+# A one-off branch needs no profile, there are flags:
 #   git-xfer list -p myproj --to b -b feature/login
 #   git-xfer list --source ~/dev/repo-a --target ~/dev/repo-b -b master
 #   git-xfer apply --ask

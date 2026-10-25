@@ -14,15 +14,15 @@ MIN_PYTHON = (3, 11)
 # интерпретаторе дали бы SyntaxError вместо внятного текста.
 if sys.version_info < MIN_PYTHON:
     raise SystemExit(
-        "git-xfer: нужен Python {need} или новее, а запущен {have}.\n"
-        "  интерпретатор: {exe}\n"
-        "  причина: конфиг читается модулем tomllib, он появился в 3.11\n"
+        "git-xfer: needs Python {need} or newer, running {have}.\n"
+        "  interpreter: {exe}\n"
+        "  reason: the config is read with the tomllib module, added in 3.11\n"
         "\n"
-        "  Поставьте утилиту так, чтобы интерпретатор фиксировался:\n"
+        "  Install the tool so that the interpreter is pinned:\n"
         "    uv tool install git+https://github.com/StasPotapov/git-xfer\n"
         "    pipx install --python python3.11 "
         "git+https://github.com/StasPotapov/git-xfer\n"
-        "  либо укажите нужный python явно:\n"
+        "  or run the right python explicitly:\n"
         "    python3.11 -m gitxfer ...".format(
             need=".".join(str(part) for part in MIN_PYTHON),
             have=".".join(str(part) for part in sys.version_info[:3]),

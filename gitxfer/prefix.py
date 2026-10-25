@@ -68,8 +68,8 @@ def subtree(git: Git, rev: str, prefix: str) -> str | None:
         return None
     kind, _, name = found.text.partition(" ")
     if kind != "tree":
-        what = {"blob": "файл", "commit": "сабмодуль"}.get(kind, kind)
-        raise NotATree(f"{prefix!r} в {rev} — это {what}, а не каталог")
+        what = {"blob": "a file", "commit": "a submodule"}.get(kind, kind)
+        raise NotATree(f"{prefix!r} in {rev} is {what}, not a directory")
     return name.strip()
 
 
@@ -162,7 +162,7 @@ class Projector:
         if new == old:
             return None
         base = self.git.out(
-            "commit-tree", old, "-m", "git-xfer: база проекции", env=FIXED_IDENTITY
+            "commit-tree", old, "-m", "git-xfer: projection base", env=FIXED_IDENTITY
         )
         message = self.git.out("show", "-s", "--format=%B", sha).rstrip("\n")
         if trailer:

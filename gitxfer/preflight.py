@@ -25,15 +25,15 @@ _MARK = {OK: "✓", WARN: "!", FAIL: "✗"}
 #: `CHERRY_PICK_HEAD` и `sequencer` проверяем оба: при одном rev git идёт
 #: в single_pick() и каталог sequencer не создаёт вовсе.
 BUSY_MARKERS: tuple[tuple[str, str], ...] = (
-    ("sequencer", "не завершён cherry-pick/revert серии (git cherry-pick --abort)"),
-    ("CHERRY_PICK_HEAD", "не завершён cherry-pick (git cherry-pick --abort)"),
-    ("REVERT_HEAD", "не завершён revert (git revert --abort)"),
-    ("MERGE_HEAD", "не завершён merge (git merge --abort)"),
+    ("sequencer", "unfinished cherry-pick/revert sequence (git cherry-pick --abort)"),
+    ("CHERRY_PICK_HEAD", "unfinished cherry-pick (git cherry-pick --abort)"),
+    ("REVERT_HEAD", "unfinished revert (git revert --abort)"),
+    ("MERGE_HEAD", "unfinished merge (git merge --abort)"),
     # AUTO_MERGE сюда не входит: git 2.54 оставляет его и после успешного
     # cherry-pick, это кэш merge-ort, а не признак незавершённой операции.
-    ("rebase-merge", "идёт rebase (git rebase --abort)"),
-    ("rebase-apply", "идёт rebase/am (git rebase --abort или git am --abort)"),
-    ("BISECT_LOG", "идёт bisect (git bisect reset)"),
+    ("rebase-merge", "rebase in progress (git rebase --abort)"),
+    ("rebase-apply", "rebase/am in progress (git rebase --abort or git am --abort)"),
+    ("BISECT_LOG", "bisect in progress (git bisect reset)"),
 )
 
 
@@ -73,7 +73,7 @@ class Report:
     def raise_if_failed(self) -> None:
         if self.failures:
             details = "\n".join(c.render() for c in self.failures)
-            raise PreflightError("предполётная проверка не прошла:\n" + details)
+            raise PreflightError("preflight check failed:\n" + details)
 
 
 #: `cherry-pick --empty=drop|keep|stop` появился в git 2.45.
@@ -91,13 +91,13 @@ def _check_git_version(git: Git, report: Report) -> bool:
     have = git_version(git)
     need = ".".join(str(part) for part in MIN_GIT)
     if have is None:
-        report.add("версия git", WARN, f"не удалось разобрать `git --version`, нужен {need}+")
+        report.add("git version", WARN, f"cannot parse `git --version`, need {need}+")
         return True
     shown = ".".join(str(part) for part in have)
     if have < MIN_GIT:
-        report.add("версия git", FAIL, f"{shown}, нужен {need}+ ради `cherry-pick --empty`")
+        report.add("git version", FAIL, f"{shown}, need {need}+ for `cherry-pick --empty`")
         return False
-    report.add("версия git", OK, shown)
+    report.add("git version", OK, shown)
     return True
 
 
@@ -162,22 +162,22 @@ def stale_xfer_refs(git: Git, keep: str | tuple[str, ...] | None = None) -> list
 def _check_target_repo(git: Git, report: Report) -> bool:
     probe = git.run("rev-parse", "--is-inside-work-tree", check=False)
     if not probe.ok or probe.text != "true":
-        report.add("целевой репозиторий", FAIL, f"{git.repo} — не рабочее дерево git")
+        report.add("target repository", FAIL, f"{git.repo} is not a git work tree")
         return False
     if git.run("rev-parse", "--is-bare-repository", check=False).text == "true":
-        report.add("целевой репозиторий", FAIL, f"{git.repo} — bare-репозиторий")
+        report.add("target repository", FAIL, f"{git.repo} is a bare repository")
         return False
-    report.add("целевой репозиторий", OK, str(git.repo))
+    report.add("target repository", OK, str(git.repo))
     return True
 
 
 def _check_head(git: Git, profile: Profile, report: Report) -> None:
     if head_sha(git) is None:
-        report.add("HEAD", FAIL, "ветка ещё без коммитов (unborn HEAD)")
+        report.add("HEAD", FAIL, "branch has no commits yet (unborn HEAD)")
         return
     branch = current_branch(git)
     if branch is None:
-        report.add("HEAD", FAIL, "detached HEAD — переключитесь на ветку")
+        report.add("HEAD", FAIL, "detached HEAD, switch to a branch")
         return
     if branch != profile.target_branch:
         # «Не выгружена» и «такой ветки нет вовсе» лечатся по-разному:
@@ -189,69 +189,69 @@ def _check_head(git: Git, profile: Profile, report: Report) -> None:
         ).text
         if exists:
             report.add(
-                "ветка",
+                "branch",
                 FAIL,
-                f"сейчас {branch!r}, а нужна {wanted!r} — переключитесь: "
+                f"on {branch!r}, need {wanted!r}; switch: "
                 f"git -C {git.repo} switch {wanted}",
             )
         else:
             report.add(
-                "ветка",
+                "branch",
                 FAIL,
-                f"ветки {wanted!r} в этом репозитории нет (сейчас {branch!r}); "
-                f"создать от текущей: git -C {git.repo} switch -c {wanted}",
+                f"no branch {wanted!r} in this repository (on {branch!r}); "
+                f"create it from the current one: git -C {git.repo} switch -c {wanted}",
             )
         return
-    report.add("ветка", OK, branch)
+    report.add("branch", OK, branch)
 
 
 def _check_busy(git: Git, report: Report) -> None:
     marker = busy_marker(git)
     if marker:
         name, hint = marker
-        report.add("незавершённых операций нет", FAIL, f"{name}: {hint}")
+        report.add("no unfinished operations", FAIL, f"{name}: {hint}")
     else:
-        report.add("незавершённых операций нет", OK)
+        report.add("no unfinished operations", OK)
 
 
 def _check_clean(git: Git, report: Report) -> None:
     changed = is_dirty(git)
     if changed:
-        report.add("дерево чистое", FAIL, f"изменений в отслеживаемых файлах: {len(changed)}")
+        report.add("clean tree", FAIL, f"changes in tracked files: {len(changed)}")
     else:
-        report.add("дерево чистое", OK)
+        report.add("clean tree", OK)
     extra = untracked(git)
     if extra:
-        report.add("untracked-файлы", WARN, f"{len(extra)} шт. — перенос может их перезаписать")
+        report.add("untracked files", WARN, f"{len(extra)}, the transfer may overwrite them")
 
 
 def _check_source(git_target: Git, git_source: Git, profile: Profile, report: Report) -> None:
     source = profile.source
     if not source.exists():
-        report.add("источник доступен", FAIL, f"{source} — путь не существует")
+        report.add("source reachable", FAIL, f"{source}: path does not exist")
         return
     try:
         heads = git_target.lines(
             "ls-remote", "--heads", "--", str(source), f"refs/heads/{profile.source_branch}"
         )
     except GitError as exc:
-        report.add("источник доступен", FAIL, f"{source} — {exc.result.stderr.strip()}")
+        report.add("source reachable", FAIL, f"{source}: {exc.result.stderr.strip()}")
         return
     if not heads:
         report.add(
-            "ветка источника",
+            "source branch",
             FAIL,
-            f"{source}: нет ветки {profile.source_branch!r}",
+            f"{source}: no branch {profile.source_branch!r}",
         )
         return
-    report.add("источник доступен", OK, f"{source} ({profile.source_branch})")
+    report.add("source reachable", OK, f"{source} ({profile.source_branch})")
 
     try:
         same = source.resolve() == profile.target.resolve()
     except OSError:
         same = False
     if same:
-        report.add("source ≠ target", FAIL, "источник и цель — один и тот же каталог")
+        report.add("source ≠ target", FAIL, "source and target are the same directory")
     else:
         report.add("source ≠ target", OK)
 
@@ -259,12 +259,12 @@ def _check_source(git_target: Git, git_source: Git, profile: Profile, report: Re
     fmt_source = git_source.run("rev-parse", "--show-object-format", check=False).text
     if fmt_source and fmt_target and fmt_source != fmt_target:
         report.add(
-            "формат объектов",
+            "object format",
             FAIL,
-            f"источник {fmt_source}, цель {fmt_target} — объекты несовместимы",
+            f"source {fmt_source}, target {fmt_target}: objects are incompatible",
         )
     else:
-        report.add("формат объектов", OK, fmt_target or "sha1")
+        report.add("object format", OK, fmt_target or "sha1")
 
 
 def _bool_config(git: Git, key: str) -> bool:
@@ -273,9 +273,9 @@ def _bool_config(git: Git, key: str) -> bool:
 
 def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: Report) -> None:
     if _bool_config(git_target, "commit.gpgsign"):
-        report.add("commit.gpgsign", WARN, "включена подпись коммитов; переносим с --no-gpg-sign")
+        report.add("commit.gpgsign", WARN, "commit signing is on; transferring with --no-gpg-sign")
     if _bool_config(git_target, "rerere.enabled"):
-        report.add("rerere.enabled", WARN, "rerere может молча подставить прошлое разрешение конфликта")
+        report.add("rerere.enabled", WARN, "rerere may silently reuse an old conflict resolution")
 
     crlf_target = git_target.run("config", "--get", "core.autocrlf", check=False).text or "false"
     crlf_source = git_source.run("config", "--get", "core.autocrlf", check=False).text or "false"
@@ -283,7 +283,7 @@ def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: 
         report.add(
             "core.autocrlf",
             WARN,
-            f"источник {crlf_source}, цель {crlf_target} — переводы строк поедут, patch-id разойдутся",
+            f"source {crlf_source}, target {crlf_target}: line endings will change, patch-ids will differ",
         )
 
     # Смотрим в подкаталог проекта, а не в корень: у монорепозитория свой
@@ -296,20 +296,20 @@ def _check_warnings(git_target: Git, git_source: Git, profile: Profile, report: 
         report.add(
             ".gitattributes",
             WARN,
-            "есть только в одном из репозиториев — нормализация текста разойдётся",
+            "exists in only one of the repositories; text normalization will differ",
         )
 
     # .gitmodules git читает только из корня рабочего дерева — файла
     # <repo>/<prefix>/.gitmodules не бывает, и искать его там нельзя.
     if (profile.target / ".gitmodules").exists() or (profile.source / ".gitmodules").exists():
-        report.add("сабмодули", WARN, "cherry-pick переносит только гитлинк, содержимое — руками")
+        report.add("submodules", WARN, "cherry-pick moves only the gitlink; move the content by hand")
 
     stale = stale_xfer_refs(git_target, keep=(profile.ref, profile.pick_ref))
     if stale:
         report.add(
             "refs/xfer",
             WARN,
-            f"остались от прошлых прогонов: {', '.join(stale)} (git-xfer cleanup)",
+            f"left over from earlier runs: {', '.join(stale)} (git-xfer cleanup)",
         )
 
 
@@ -321,8 +321,8 @@ def _toplevel_hint(git: Git, path: Path, key: str) -> str | None:
     top = git.run("rev-parse", "--show-toplevel", check=False).text or str(path)
     prefix = inside.text.rstrip("/")
     return (
-        f"{path} — это подкаталог репозитория {top}. Путь стороны должен "
-        f"указывать на корень, а подкаталог задаётся отдельным ключом: "
+        f"{path} is a subdirectory of repository {top}. A side path must "
+        f"point to the repository root; set the subdirectory with a separate key: "
         f"{key} = \"{top}\", {key}_prefix = \"{prefix}\""
     )
 
@@ -334,38 +334,38 @@ def _check_prefixes(git_target: Git, git_source: Git, profile: Profile, report: 
     # источник — это сторона `b`, и подсказка про `a_prefix` увела бы
     # человека править не ту половину пары.
     sides = (
-        ("источник", git_source, profile.source, profile.source_prefix,
+        ("source", git_source, profile.source, profile.source_prefix,
          profile.source_branch, profile.source_key),
-        ("цель", git_target, profile.target, profile.target_prefix,
+        ("target", git_target, profile.target, profile.target_prefix,
          profile.target_branch, profile.target_key),
     )
     for name, git, path, prefix, branch, key in sides:
         hint = _toplevel_hint(git, path, key)
         if hint:
-            report.add(f"путь: {name}", FAIL, hint)
+            report.add(f"path: {name}", FAIL, hint)
             continue
         if not prefix:
             continue
         try:
             found = subtree(git, branch, prefix)
         except NotATree as exc:
-            report.add(f"подкаталог: {name}", FAIL, str(exc))
+            report.add(f"subdirectory: {name}", FAIL, str(exc))
             continue
         if found:
-            report.add(f"подкаталог: {name}", OK, f"{prefix}/ в {branch}")
+            report.add(f"subdirectory: {name}", OK, f"{prefix}/ in {branch}")
         elif key == profile.target_key:
             # В цели подкаталог может появиться первым же перенесённым
             # коммитом — это законно.
             report.add(
-                f"подкаталог: {name}",
+                f"subdirectory: {name}",
                 WARN,
-                f"{prefix!r} в ветке {branch!r} ещё нет; создастся первым переносом",
+                f"{prefix!r} does not exist in branch {branch!r} yet; the first transfer creates it",
             )
         else:
             report.add(
-                f"подкаталог: {name}",
+                f"subdirectory: {name}",
                 FAIL,
-                f"{prefix!r} — такого каталога нет в ветке {branch!r} ({path}), переносить нечего",
+                f"{prefix!r}: no such directory in branch {branch!r} ({path}), nothing to transfer",
             )
 
 

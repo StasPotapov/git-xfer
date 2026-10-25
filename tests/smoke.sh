@@ -93,7 +93,7 @@ hasnt "merge: влили side" "$OUT" "merge-коммит по умолчани�
 has "merge: влили side" "$(xfer list -p t --to b --allow-merges)" "--allow-merges показывает merge-коммит"
 PLAN=$(xfer plan -p t --to b --commits 3,4,5,6,7)
 has "✗ .*конфликтует" "$PLAN" "plan предсказал конфликт там, где он есть"
-has "станет пустым" "$PLAN" "plan предсказал пустой коммит"
+has "will become empty" "$PLAN" "plan предсказал пустой коммит"
 check "" "$(git -C "$WORK/b" status --porcelain=v2)" "plan не тронул рабочее дерево"
 
 echo "== 5. apply с конфликтом и continue =="
@@ -142,7 +142,7 @@ git -C "$WORK/b" cherry-pick --abort >/dev/null 2>&1
 git -C "$WORK/b" reset -q --hard HEAD~1
 OUT=$(xfer skip -p t --to b 2>&1); CODE=$?
 check 1 $CODE "skip отказался работать поверх чужого HEAD"
-has "HEAD ушёл не туда" "$OUT" "и сказал об этом внятно"
+has "HEAD moved while the transfer was paused" "$OUT" "и сказал об этом внятно"
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 
 echo "== 8. повторный list и cleanup =="
@@ -158,7 +158,7 @@ check "" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)" "re
 echo "== 9. non-TTY =="
 OUT=$(xfer apply -p t --to b < /dev/null 2>&1); CODE=$?
 check 1 $CODE "без выбора и без терминала — ошибка, а не зависание"
-has "stdin не терминал" "$OUT" "и сказано, что делать"
+has "stdin is not a terminal" "$OUT" "и сказано, что делать"
 OUT=$(xfer apply -p t --to b -i < /dev/null 2>&1); CODE=$?
 check 1 $CODE "-i без терминала — ошибка"
 
@@ -174,7 +174,7 @@ check 1 $CODE "apply под --dry-run отказывается"
 has "git-xfer plan" "$OUT" "и отправляет в plan"
 BEFORE=$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)
 OUT=$(xfer -n cleanup -p t --to b 2>&1)
-hasnt "^Удалён" "$OUT" "cleanup под --dry-run не рапортует об удалении"
+hasnt "^Deleted" "$OUT" "cleanup под --dry-run не рапортует об удалении"
 check "$BEFORE" "$(git -C "$WORK/b" for-each-ref --format='%(refname)' refs/xfer/)" "и ничего не удалил"
 xfer cleanup -p t --to b >/dev/null 2>&1
 OUT=$(xfer -n plan -p t --to b --commits 1 2>&1); CODE=$?
@@ -228,7 +228,7 @@ done
 if [ -n "$OLD" ]; then
   OUT=$(PYTHONPATH="$ROOT" "$OLD" -m gitxfer --version 2>&1); CODE=$?
   check 1 $CODE "код выхода 1, а не трейсбек"
-  has "нужен Python 3.11" "$OUT" "сказано, какая версия нужна"
+  has "needs Python 3.11" "$OUT" "сказано, какая версия нужна"
   hasnt "ModuleNotFoundError" "$OUT" "ModuleNotFoundError наружу не вылезает"
 else
   ok "python старше 3.11 на машине не нашёлся — проверку пропускаем"
@@ -290,7 +290,7 @@ LOG="$WORK/state/git-xfer/git-xfer.log"
 if [ -s "$LOG" ]; then ok "журнал пишется"; else bad "журнал пишется"; fi
 if grep -q "git fetch" "$LOG"; then ok "в журнале видны вызовы git"; else bad "в журнале видны вызовы git"; fi
 OUT=$(xfer status -p t --to b 2>&1)
-has "Журнал:" "$OUT" "status показывает, где журнал"
+has "Log:" "$OUT" "status показывает, где журнал"
 BEFORE=$(wc -c < "$LOG")
 xfer --no-log doctor -p t --to b >/dev/null 2>&1
 check "$BEFORE" "$(wc -c < "$LOG")" "--no-log ничего не дописывает"
@@ -312,12 +312,12 @@ xfer doctor --config "$QUIET" -p t --to b >/dev/null 2>&1
 check 0 $? "конфиг с log = false разбирается"
 check "$BEFORE" "$(wc -c < "$LOG")" "log = false в конфиге выключает журнал"
 OUT=$(xfer status --config "$QUIET" -p t --to b 2>&1)
-has "Журнал:  выключен" "$OUT" "status честно говорит, что журнал выключен"
+has "Log:     off" "$OUT" "status честно говорит, что журнал выключен"
 
 echo "== 19. флаги в обход конфига =="
 OUT=$(xfer list --source "$WORK/a" --target "$WORK/b" -b master </dev/null 2>&1); CODE=$?
 check 0 $CODE "--source/--target работают, когда конфиг не нужен"
-hasnt "укажите направление" "$OUT" "и не требуют --to"
+hasnt "give the direction" "$OUT" "и не требуют --to"
 BROKEN="$WORK/broken.toml"
 printf '[profiles.x]\na = "/nowhere"\n' > "$BROKEN"
 OUT=$(xfer list --config "$BROKEN" --source "$WORK/a" --target "$WORK/b" -b master </dev/null 2>&1); CODE=$?
@@ -354,7 +354,7 @@ if [ -e "$WORK/b/.git/CHERRY_PICK_HEAD" ]; then ok "cherry-pick на паузе"
 # Имя направления теперь другое (без -b), но доделать серию это мешать не должно.
 OUT=$(xfer abort -p t --to b 2>&1); CODE=$?
 check 0 $CODE "abort без -b доделывает серию, начатую с -b"
-has "серия начата как" "$OUT" "и честно говорит, что имя другое"
+has "series was started as" "$OUT" "и честно говорит, что имя другое"
 check "" "$(git -C "$WORK/b" status --porcelain=v2)" "после abort дерево чистое"
 git -C "$WORK/b" checkout -q master
 xfer cleanup -p t --to b --all --state >/dev/null 2>&1
@@ -391,7 +391,7 @@ b = "$WORK/b"
 branch = "master"
 EOF
   OUT=$(xfer status --config "$POL" -p t --to b 2>&1)
-  has "Конфликты: $V" "$OUT" "status показывает политику $V"
+  has "Conflicts: $V" "$OUT" "status показывает политику $V"
 done
 cat > "$POL" <<EOF
 [agent]
@@ -405,7 +405,7 @@ EOF
 OUT=$(xfer status --config "$POL" -p t --to b 2>&1); CODE=$?
 check 1 $CODE "опечатка в политике — ошибка, а не молчание"
 has "resolve_conflicts" "$OUT" "и названа причина"
-DEFAULT=$(xfer status -p t --to b 2>&1 | grep "^Конфликты:")
+DEFAULT=$(xfer status -p t --to b 2>&1 | grep "^Conflicts:")
 has "mechanical" "$DEFAULT" "по умолчанию mechanical"
 
 echo "== 24. скилл на месте и описан =="
@@ -469,7 +469,7 @@ OUT=$(cd "$GONE" && rmdir "$GONE" && PYTHONPATH="$ROOT" XDG_CONFIG_HOME="$WORK/c
       XDG_STATE_HOME="$WORK/state" python3 -m gitxfer list -p t --to b 2>&1); CODE=$?
 check 0 $CODE "и полноценная команда тоже"
 hasnt "FileNotFoundError" "$OUT" "FileNotFoundError наружу не вылезает"
-if grep -q "каталога больше нет" "$WORK/state/git-xfer/git-xfer.log"; then
+if grep -q "directory no longer exists" "$WORK/state/git-xfer/git-xfer.log"; then
   ok "журнал отметил, что каталога нет"
 else
   bad "журнал отметил, что каталога нет"
@@ -482,22 +482,22 @@ SKILL="$ROOT/skills/git-xfer/SKILL.md"
 sk() { grep -qF -- "$1" "$SKILL" && ok "в скилле описано: $2" || bad "в скилле описано: $2"; }
 
 OUT=$(xfer doctor --config "$WORK/nope.toml" -p x 2>&1); MSG=$(printf '%s\n' "$OUT" | head -1)
-case "$MSG" in *"конфиг не найден"*) ok "текст «конфиг не найден» не менялся";;
+case "$MSG" in *"config not found"*) ok "текст «конфиг не найден» не менялся";;
                 *) bad "текст «конфиг не найден» не менялся (сейчас: $MSG)";; esac
-sk "конфиг не найден" "отсутствующий конфиг"
+sk "config not found" "отсутствующий конфиг"
 
 xfer init --config "$WORK/tpl.toml" >/dev/null 2>&1
 OUT=$(xfer doctor --config "$WORK/tpl.toml" -p x 2>&1 | head -1)
-case "$OUT" in *"не описан ни один профиль"*) ok "текст про пустой шаблон не менялся";;
+case "$OUT" in *"no profiles defined"*) ok "текст про пустой шаблон не менялся";;
                 *) bad "текст про пустой шаблон не менялся (сейчас: $OUT)";; esac
-sk "не описан ни один профиль" "пустой шаблон"
+sk "no profiles defined" "пустой шаблон"
 
 OUT=$(python3 "$ROOT/gitxfer/cli.py" 2>&1 | head -1)
-case "$OUT" in *"часть пакета"*) ok "текст про запуск файла не менялся";;
+case "$OUT" in *"part of a package"*) ok "текст про запуск файла не менялся";;
                 *) bad "текст про запуск файла не менялся (сейчас: $OUT)";; esac
 
 sk "is not a git command" "git xfer без PATH"
-sk "нужен Python 3.11 или новее" "старый python"
+sk "needs Python 3.11 or newer" "старый python"
 sk "os.getcwd()" "исчезнувший каталог"
 sk "uv tool install git+https://github.com/StasPotapov/git-xfer" "установка из открытого репозитория"
 # Репозиторий публичный: доступ для клона не нужен, и скилл не должен
@@ -540,7 +540,7 @@ pfx_config "apps/mobile"
 OUT=$(xfer doctor -p myapp --to b 2>&1); CODE=$?
 check 0 $CODE "doctor зелёный на профиле с a_prefix"
 has "apps/mobile" "$OUT" "подкаталог виден в направлении"
-has "подкаталог: источник" "$OUT" "есть проверка подкаталога"
+has "subdirectory: source" "$OUT" "есть проверка подкаталога"
 
 pfx_config "apps/mobile/"
 OUT=$(xfer doctor -p myapp --to b 2>&1); check 0 $? "хвостовой слеш нормализуется"
@@ -550,7 +550,7 @@ OUT=$(xfer doctor -p myapp --to b 2>&1); check 0 $? "двойной слеш н�
 bad_config "$WORK/p-abs.toml" "$WORK/m" "/абсолютный"
 OUT=$(xfer doctor --config "$WORK/p-abs.toml" -p bad --to b 2>&1); CODE=$?
 check 1 $CODE "абсолютный префикс — ошибка конфига"
-has "не абсолютный" "$OUT" "и сказано почему"
+has "not an absolute one" "$OUT" "и сказано почему"
 
 bad_config "$WORK/p-up.toml" "$WORK/m" "../наружу"
 OUT=$(xfer doctor --config "$WORK/p-up.toml" -p bad --to b 2>&1); CODE=$?
@@ -559,12 +559,12 @@ check 1 $CODE "'..' в префиксе — ошибка конфига"
 bad_config "$WORK/p-none.toml" "$WORK/m" "нет-такого"
 OUT=$(xfer doctor --config "$WORK/p-none.toml" -p bad --to b 2>&1); CODE=$?
 check 2 $CODE "несуществующий подкаталог — предполётная ошибка"
-has "переносить нечего" "$OUT" "и сказано, что переносить нечего"
+has "nothing to transfer" "$OUT" "и сказано, что переносить нечего"
 
 bad_config "$WORK/p-file.toml" "$WORK/m" "README.md"
 OUT=$(xfer doctor --config "$WORK/p-file.toml" -p bad --to b 2>&1); CODE=$?
 check 2 $CODE "префикс указывает на файл — предполётная ошибка"
-has "а не каталог" "$OUT" "и сказано, что это не каталог"
+has "not a directory" "$OUT" "и сказано, что это не каталог"
 
 printf '[profiles.bad]\na = "%s"\nb = "%s"\nbranch = "master"\n' \
   "$WORK/m/apps/mobile" "$WORK/n" > "$WORK/p-inside.toml"
@@ -587,7 +587,7 @@ hasnt "chore: сборка" "$OUT" "коммит целиком вне подк�
 hasnt "init: монорепо" "$OUT" "и коммит до появления подкаталога тоже"
 has "feat: звезда" "$OUT" "коммит внутри подкаталога показан"
 has "+\*" "$OUT" "пограничный коммит помечен звёздочкой"
-has "вне подкаталога" "$OUT" "в легенде расшифровано, что значит звёздочка"
+has "outside the subdirectory" "$OUT" "в легенде расшифровано, что значит звёздочка"
 # Одинаковое содержимое по обе стороны: в m оно под префиксом, в n — в корне.
 # Совпавший patch-id доказывает, что --relative срезает префикс правильно.
 if printf '%s\n' "$OUT" | grep -q "≈.*init: подпроект"; then
@@ -627,7 +627,7 @@ SRC_OUT=$(git -C "$WORK/m" log --format='%H %s' | grep 'chore: сборка' | c
 HEAD_BEFORE=$(git -C "$WORK/n" rev-parse HEAD)
 OUT=$(xfer apply -p myapp --to b --sha "$SRC_OUT" --yes 2>&1); CODE=$?
 check 0 $CODE "прогон завершился без ошибки"
-has "подкаталог не затронут" "$OUT" "и сказано почему"
+has "subdirectory not touched" "$OUT" "и сказано почему"
 check "$HEAD_BEFORE" "$(git -C "$WORK/n" rev-parse HEAD)" "HEAD цели не сдвинулся"
 
 echo "== 35. префикс: сухой прогон предсказывает то же, что делает apply =="
@@ -635,7 +635,7 @@ SRC_APP=$(git -C "$WORK/m" log --format='%H %s' | grep 'fix: правка app.kt
 OUT=$(xfer plan -p myapp --to b --sha "$SRC_APP" "$SRC_OUT" 2>&1); CODE=$?
 check 0 $CODE "plan на профиле с префиксом отработал"
 has "✗" "$OUT" "конфликт предсказан"
-has "станет пустым" "$OUT" "коммит вне подкаталога предсказан пустым"
+has "will become empty" "$OUT" "коммит вне подкаталога предсказан пустым"
 hasnt "apps/mobile/" "$OUT" "в предсказании нет путей с префиксом источника"
 has "app.kt" "$OUT" "а есть путь в координатах цели"
 
@@ -828,8 +828,8 @@ keep_author = false
 trailer = false
 EOF
 OUT=$(xfer status --config "$WORK/keep.toml" -p t --to b 2>&1)
-has "автор исходного коммита сохраняется" "$OUT" "status показывает режим авторства"
-has "трейлер" "$OUT" "status показывает режим сообщения"
+has "the original commit author is kept" "$OUT" "status показывает режим авторства"
+has "trailer (cherry picked" "$OUT" "status показывает режим сообщения"
 xfer apply --config "$WORK/keep.toml" -p t --to b --sha "$BETA" --yes >/dev/null 2>&1
 check 0 $? "перенос по конфигу с keep_author/trailer прошёл"
 check "Ann Source" "$(git -C "$WORK/b" log -1 --format='%an')" "keep_author из конфига сработал"
@@ -837,7 +837,7 @@ has "cherry picked from commit $BETA" "$(git -C "$WORK/b" log -1 --format=%B)" "
 
 # Профиль перебивает [defaults], флаг перебивает профиль.
 OUT=$(xfer status --config "$WORK/keep.toml" -p plain --to b 2>&1)
-has "автором станет тот, кто переносит" "$OUT" "профиль перебивает [defaults]"
+has "the person who transfers becomes the author" "$OUT" "профиль перебивает [defaults]"
 git -C "$WORK/b" reset -q --hard HEAD~1
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 xfer apply --config "$WORK/keep.toml" -p t --to b --sha "$BETA" --yes --reset-author --no-trailer >/dev/null 2>&1
@@ -859,7 +859,7 @@ BEFORE=$(git -C "$WORK/b" rev-parse HEAD)
 OUT=$(xfer apply -p t --to b --sha "$GAMMA" "$DELTA" "$EPS" --yes --squash 2>&1); CODE=$?
 check 0 $CODE "перенос со --squash прошёл"
 check 1 "$(git -C "$WORK/b" rev-list --count "$BEFORE"..HEAD)" "в цели появился ровно один коммит"
-has "Схлопнуто в один коммит" "$OUT" "итог сказал, что схлопнул"
+has "Squashed into one commit" "$OUT" "итог сказал, что схлопнул"
 BODY=$(git -C "$WORK/b" log -1 --format=%B)
 has "feat: gamma" "$BODY" "сообщение собрано из первого коммита"
 has "feat: eps" "$BODY" "и из последнего"
@@ -877,7 +877,7 @@ xfer apply -p t --to b --sha "$GAMMA" "$DELTA" --yes --squash --message "feat: �
 check "feat: гамма и дельта разом" "$(git -C "$WORK/b" log -1 --format=%s)" "--message задаёт сообщение схлопнутого"
 OUT=$(xfer apply -p t --to b --sha "$EPS" --yes --message "просто так" 2>&1); CODE=$?
 check 1 $CODE "--message без --squash — ошибка вызова"
-has "без --squash" "$OUT" "и объяснено почему"
+has "without --squash" "$OUT" "и объяснено почему"
 
 cat > "$WORK/squash.toml" <<EOF
 [defaults]
@@ -889,7 +889,7 @@ b = "$WORK/b"
 branch = "master"
 EOF
 OUT=$(xfer status --config "$WORK/squash.toml" -p t --to b 2>&1)
-has "вся серия в один коммит" "$OUT" "status показывает режим схлопывания"
+has "the whole series into one commit" "$OUT" "status показывает режим схлопывания"
 git -C "$WORK/b" reset -q --hard "$BEFORE"
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 xfer apply --config "$WORK/squash.toml" -p t --to b --sha "$GAMMA" "$DELTA" --yes >/dev/null 2>&1
@@ -963,8 +963,8 @@ BREAK_PY
 check 0 $? "подстроенный сбой на втором коммите случился"
 check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE3"..HEAD)" "оба коммита в истории: второй успел закоммититься"
 OUT=$(xfer status -p t --to b 2>&1)
-has "сделано 2" "$OUT" "state знает, что оба шага состоялись"
-hasnt "HEAD не там" "$OUT" "и не считает HEAD уехавшим"
+has "done 2" "$OUT" "state знает, что оба шага состоялись"
+hasnt "HEAD is not where" "$OUT" "и не считает HEAD уехавшим"
 OUT=$(xfer continue -p t --to b 2>&1); CODE=$?
 check 0 $CODE "continue закрывает серию, а не требует разбираться руками"
 check 2 "$(git -C "$WORK/b" rev-list --count "$BEFORE3"..HEAD)" "и ничего не продублировал"
@@ -978,7 +978,7 @@ xfer sync -p t --to b >/dev/null
 # Схлопывать нечего, но сообщение просили — потерять его молча нельзя.
 OUT=$(xfer apply -p t --to b --sha "$THETA" --yes --squash --message "feat: одна тета" 2>&1)
 check "feat: одна тета" "$(git -C "$WORK/b" log -1 --format=%s)" "--message применён и к одному коммиту"
-has "схлопывать было нечего" "$OUT" "и сказано, что схлопывать было нечего"
+has "nothing to squash" "$OUT" "и сказано, что схлопывать было нечего"
 
 # Между reset --soft и commit ветка стоит отмотанной: сорвавшийся коммит
 # обязан вернуть её, а не оставить серию доступной только через reflog.
@@ -1040,8 +1040,8 @@ for path in (Path(sys.argv[1]) / "state" / "git-xfer").glob("*.json"):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 STRIP_PY
 OUT=$(xfer status -p t --to b 2>&1)
-has "трейлер" "$OUT" "status показывает опции старой серии, а не новые дефолты"
-has "Co-authored-by остаются" "$OUT" "старая серия соавторов не вырезает — как и начиналась"
+has "trailer (cherry picked" "$OUT" "status показывает опции старой серии, а не новые дефолты"
+has "Co-authored-by lines are kept" "$OUT" "старая серия соавторов не вырезает — как и начиналась"
 printf 'l1\nl2\nRESOLVED-OLD\nl4\nl5\n' > "$WORK/b/src/app.py"
 git -C "$WORK/b" add src/app.py
 xfer continue -p t --to b >/dev/null 2>&1
@@ -1070,11 +1070,11 @@ doc "the mapping in state is keyed to the target repository" "$ROOT/skills/git-x
 echo "== 49. status показывает, в какую ветку на самом деле ляжет =="
 xfer cleanup -p t --to b --state >/dev/null 2>&1
 OUT=$(xfer status -p t --to b 2>&1)
-has "Ветка цели: master (выгружена)" "$OUT" "ветка профиля выгружена — так и сказано"
+has "Target branch: master (checked out)" "$OUT" "ветка профиля выгружена — так и сказано"
 git -C "$WORK/b" switch -q -c side-work
 OUT=$(xfer status -p t --to b 2>&1)
-has "в профиле master" "$OUT" "видно, что записано в профиле"
-has "сейчас выгружена side-work" "$OUT" "и что выгружено на самом деле"
+has "master in the profile" "$OUT" "видно, что записано в профиле"
+has "side-work is checked out" "$OUT" "и что выгружено на самом деле"
 has "\-\-target-branch side-work" "$OUT" "и подсказано, как перенести именно туда"
 # Перенос в невыгруженную ветку — предполётная ошибка, а не тихий промах.
 OUT=$(xfer doctor -p t --to b 2>&1); CODE=$?
@@ -1101,13 +1101,13 @@ echo "== 50. ветки нет вовсе — это отдельный разг
 # поэтому doctor обязан говорить, чего именно не хватает.
 OUT=$(xfer doctor -p t --to b --target-branch нет-такой-ветки 2>&1); CODE=$?
 check 2 $CODE "перенос в несуществующую ветку не начнётся"
-has "в этом репозитории нет" "$OUT" "и сказано, что ветки нет вовсе"
+has "in this repository" "$OUT" "и сказано, что ветки нет вовсе"
 has "switch -c" "$OUT" "и показано, как её создать"
 git -C "$WORK/b" branch -q other-work
 OUT=$(xfer doctor -p t --to b --target-branch other-work 2>&1); CODE=$?
 check 2 $CODE "перенос в невыгруженную ветку тоже не начнётся"
-has "переключитесь" "$OUT" "но сказано уже другое — что надо переключиться"
-hasnt "в этом репозитории нет" "$OUT" "и про «нет такой ветки» речи не идёт"
+has "switch: git" "$OUT" "но сказано уже другое — что надо переключиться"
+hasnt "in this repository" "$OUT" "и про «нет такой ветки» речи не идёт"
 git -C "$WORK/b" branch -q -D other-work
 
 echo "== 51. разовые ветки не путаются между собой =="
@@ -1137,7 +1137,7 @@ bad_key() { # файл строка-ключа
 bad_key "$WORK/bad-author.toml" 'keep_author = "yes"'
 OUT=$(xfer status --config "$WORK/bad-author.toml" -p x --to b 2>&1); CODE=$?
 check 1 $CODE "keep_author строкой — ошибка конфига"
-has "true или false" "$OUT" "и сказано, что ждали"
+has "true or false" "$OUT" "и сказано, что ждали"
 bad_key "$WORK/bad-timeout.toml" 'git_timeout = -5'
 OUT=$(xfer status --config "$WORK/bad-timeout.toml" -p x --to b 2>&1); CODE=$?
 check 1 $CODE "отрицательный git_timeout — ошибка конфига"
@@ -1201,13 +1201,13 @@ echo "== 53. правила skip =="
 OUT=$(sx list -p s --to b 2>&1)
 has "+× .* Служебный: заметки" "$OUT" "служебный по заголовку помечен ×"
 has "+× .* обновил лок" "$OUT" "коммит только из *.lock помечен ×"
-has "не переносим по правилам skip: 2" "$OUT" "в легенде счётчик ×"
+has "excluded by skip rules: 2" "$OUT" "в легенде счётчик ×"
 OUT=$(sx list -p s --to b --new 2>&1)
 hasnt "Служебный" "$OUT" "list --new служебные прячет"
-has "скрыто по правилам skip: 2" "$OUT" "и говорит, сколько спрятал"
+has "hidden by skip rules: 2" "$OUT" "и говорит, сколько спрятал"
 OUT=$(sx plan -p s --to b --commits 'all' </dev/null 2>&1); CODE=$?
 check 0 $CODE "plan --commits all проходит"
-has "Не берём — под правилами skip" "$OUT" "all пропускает служебные и говорит об этом"
+has "Not taken, under skip rules" "$OUT" "all пропускает служебные и говорит об этом"
 hasnt "[0-9]\. $(git -C "$SK/a" rev-parse --short=7 "$SERVICE")" "$OUT" \
   "служебного нет в порядке применения"
 OUT=$(sx plan -p s --to b --commits 1 </dev/null 2>&1); CODE=$?
@@ -1264,12 +1264,12 @@ REFS_A=$(git -C "$SK/a" for-each-ref)
 STATUS_B=$(git -C "$SK/b" status --porcelain=v2)
 OUT=$(sx compare -p s --to b 2>&1); CODE=$?
 check 0 $CODE "compare отработал"
-has "Файлы проекта сейчас: отличаются" "$OUT" "есть сводка по файлам"
-has "Нет в цели:" "$OUT" "есть блок «нет в цели»"
-has "Не переносим по правилам skip: 2" "$OUT" "служебные — отдельным блоком"
-has "Есть только в цели:" "$OUT" "есть обратный блок"
+has "Project files now: differ" "$OUT" "есть сводка по файлам"
+has "Missing in target:" "$OUT" "есть блок «нет в цели»"
+has "Excluded by skip rules: 2" "$OUT" "служебные — отдельным блоком"
+has "Only in target:" "$OUT" "есть обратный блок"
 has "правка только в цели" "$OUT" "и в нём коммит, сделанный только в цели"
-has "файлы уже совпадают" "$OUT" "дубль узнан по файлам"
+has "files already match" "$OUT" "дубль узнан по файлам"
 check "$REFS_A" "$(git -C "$SK/a" for-each-ref)" "репозиторий-источник не тронут"
 check "$STATUS_B" "$(git -C "$SK/b" status --porcelain=v2)" "рабочее дерево цели не тронуто"
 sx compare -p s --to b --json > "$SK/cmp.json" 2>/dev/null
@@ -1286,9 +1286,9 @@ assert set(data) >= {"source", "target", "files", "missing", "target_only", "war
 CMP_PY
 OUT=$(sx compare -p p --to b --files 2>&1); CODE=$?
 check 0 $CODE "compare на паре с подкаталогом"
-hasnt "apps/mobile/" "$(printf '%s\n' "$OUT" | sed -n '/^Файлы/,/^$/p')" \
+hasnt "apps/mobile/" "$(printf '%s\n' "$OUT" | sed -n '/^Project files/,/^$/p')" \
   "пути файлов — от корня проекта"
-has "Есть только в цели: [1-9]" "$OUT" "расхождение видно в обе стороны"
+has "Only in target: [1-9]" "$OUT" "расхождение видно в обе стороны"
 sx compare -p p --to a >/dev/null 2>&1
 check 0 $? "и в обратную сторону"
 
@@ -1313,9 +1313,9 @@ git -C "$ST/b" switch -q master
 stx() { xfer list --source "$ST/a" --target "$ST/b" "$@" >/dev/null 2>&1; \
         xfer plan --source "$ST/a" --target "$ST/b" --sha "$(git -C "$ST/a" rev-parse HEAD)" "$@" 2>&1; }
 OUT=$(stx -b master)
-has "Конфликтов не ожидается" "$OUT" "plan на выгруженную ветку — без конфликта"
+has "No conflicts expected" "$OUT" "plan на выгруженную ветку — без конфликта"
 OUT=$(stx --source-branch master --target-branch side)
-has "конфликт: f.txt" "$OUT" "plan на невыгруженную ветку считает от неё, а не от HEAD"
+has "conflict: f.txt" "$OUT" "plan на невыгруженную ветку считает от неё, а не от HEAD"
 
 sed 's/^l3$/l3 грязная/' "$ST/b/f.txt" > "$ST/f.tmp" && mv "$ST/f.tmp" "$ST/b/f.txt"
 MARK="git-xfer autostash smoke 2026-01-01T00:00:00"
@@ -1383,9 +1383,9 @@ branch = "master"
 keep_coauthors = true
 EOF
 OUT=$(xfer status --config "$WORK/coauthors.toml" -p ca --to b 2>&1)
-has "Co-authored-by остаются" "$OUT" "status показывает keep_coauthors из профиля"
+has "Co-authored-by lines are kept" "$OUT" "status показывает keep_coauthors из профиля"
 OUT=$(cax status 2>&1)
-has "Co-authored-by вырезаются" "$OUT" "и дефолт — вырезать"
+has "Co-authored-by lines are stripped" "$OUT" "и дефолт — вырезать"
 C4=$(ca_commit "x1 четвёртый" "$(printf 'feat: четыре\n\nCo-authored-by: Bot <bot@example.com>')")
 xfer sync --config "$WORK/coauthors.toml" -p ca --to b >/dev/null 2>&1
 xfer apply --config "$WORK/coauthors.toml" -p ca --to b --sha "$C4" --yes >/dev/null 2>&1

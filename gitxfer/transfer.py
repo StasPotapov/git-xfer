@@ -251,7 +251,7 @@ def own_commit(git: Git, options: Options, env: dict[str, str] | None = None) ->
     )
     if not result.ok:
         raise XferError(
-            "не удалось переписать автора или сообщение перенесённого коммита:\n"
+            "cannot rewrite the author or message of the transferred commit:\n"
             + result.describe()
         )
     return head_sha(git) or ""
@@ -288,7 +288,7 @@ def retitle(git: Git, options: Options, message: str) -> str:
     )
     if not result.ok:
         raise XferError(
-            "не удалось записать сообщение из --message:\n" + result.describe()
+            "cannot write the message from --message:\n" + result.describe()
         )
     return head_sha(git) or ""
 
@@ -318,8 +318,8 @@ def collapse(
         if len(picked) == 1 and options.message.strip() and head != base:
             retitle(git, options, options.message.strip())
             report(
-                "  схлопывать было нечего — приехал один коммит; "
-                "сообщение из --message на нём"
+                "  nothing to squash: one commit arrived; "
+                "it has the message from --message"
             )
         return
     env = _committer_env(git, options, picked[-1])
@@ -341,13 +341,13 @@ def collapse(
         )
         if not result.ok:
             raise XferError(
-                "не удалось схлопнуть серию в один коммит:\n" + result.describe()
+                "cannot squash the series into one commit:\n" + result.describe()
             )
     except BaseException:
         # `reset --soft` не трогал ни дерево, ни индекс, поэтому обратный
         # `--soft` возвращает ровно то, что было.
         git.run("reset", "--soft", head, check=False, mutating=True)
-        logbook.error("схлопывание не удалось, ветка возвращена на %s", head)
+        logbook.error("squash failed, branch restored to %s", head)
         raise
     squashed = head_sha(git) or ""
     # Маппинг обязан указывать на коммит, который и правда есть в истории:
@@ -364,8 +364,8 @@ def collapse(
             step_result.dst = squashed
     outcome.squashed = squashed
     outcome.squashed_count = len(picked)
-    logbook.info("схлопнуто %d коммит(ов) в %s", len(picked), squashed)
-    report(f"  {len(picked)} коммит(ов) схлопнуты в один: {squashed[:12]}")
+    logbook.info("squashed %d commit(s) into %s", len(picked), squashed)
+    report(f"  {len(picked)} commit(s) squashed into one: {squashed[:12]}")
 
 
 def is_merge_commit(git: Git, sha: str) -> bool:
@@ -446,7 +446,7 @@ def _drain(
         index = len(progress.done) + 1
         subject = git.out("show", "-s", "--format=%s", sha)
         report(f"[{index}/{total}] {sha[:12]} {subject}")
-        logbook.info("шаг %d/%d: беру %s %s", index, total, sha, subject)
+        logbook.info("step %d/%d: picking %s %s", index, total, sha, subject)
         try:
             status, result, head = pick(git, sha, options, projector)
         except XferError:
@@ -456,7 +456,7 @@ def _drain(
             # работать, а повторный `apply` продублирует коммит.
             _record_interrupted(git, state, progress, outcome, sha)
             raise
-        logbook.info("шаг %d/%d: %s → %s", index, total, status, head or "HEAD не сдвинулся")
+        logbook.info("step %d/%d: %s → %s", index, total, status, head or "HEAD did not move")
         if status == CONFLICT:
             progress.expected_head = head
             state.in_progress = progress
@@ -464,9 +464,9 @@ def _drain(
             outcome.conflict = sha
             outcome.remaining = list(progress.queue)
             logbook.warn(
-                "конфликт на %s; в очереди осталось %d", sha, len(progress.queue)
+                "conflict on %s; %d left in queue", sha, len(progress.queue)
             )
-            report("  конфликт — разрешите его и выполните: git-xfer continue")
+            report("  conflict: resolve it and run: git-xfer continue")
             report(result.stdout.strip() or result.stderr.strip())
             return outcome
         if status == FAILED:
@@ -474,8 +474,8 @@ def _drain(
             progress.current = None
             state.in_progress = progress
             state.save()
-            logbook.error("cherry-pick %s не удался: %s", sha, result.describe())
-            raise XferError(f"cherry-pick {sha[:12]} не удался:\n{result.describe()}")
+            logbook.error("cherry-pick %s failed: %s", sha, result.describe())
+            raise XferError(f"cherry-pick {sha[:12]} failed:\n{result.describe()}")
         _record(state, progress, outcome, sha, status, head)
         if status == EMPTY:
             untouched = projector.enabled and (
@@ -483,12 +483,12 @@ def _drain(
                 projector.commit(sha, trailer=options.trailer) is None
             )
             report(
-                "  подкаталог не затронут — пропущен"
+                "  subdirectory not touched, skipped"
                 if untouched
-                else "  пусто после переноса — пропущен"
+                else "  empty after transfer, skipped"
             )
         elif status == SKIPPED:
-            report("  merge-коммит — пропущен (нужен --allow-merges)")
+            report("  merge commit, skipped (needs --allow-merges)")
         progress.expected_head = head or progress.expected_head
         state.save()
     progress.current = None
@@ -553,11 +553,11 @@ def start(
     """Начать новую серию переноса."""
     if state.in_progress:
         raise StateError(
-            "есть незавершённый перенос. Закончите его: git-xfer continue / skip / abort"
+            "a transfer is unfinished. Finish it: git-xfer continue / skip / abort"
         )
     head = head_sha(git)
     if not head:
-        raise XferError("в целевой ветке нет коммитов")
+        raise XferError("the target branch has no commits")
     # Префиксы направления фиксируем в опциях серии здесь, а не в cli:
     # так их не забудет ни один вызывающий.
     options.source_prefix = profile.source_prefix
@@ -573,7 +573,7 @@ def start(
     state.in_progress = progress
     state.save()
     logbook.info(
-        "серия: %d коммит(ов), профиль %s, HEAD до начала %s",
+        "series: %d commit(s), profile %s, HEAD before start %s",
         len(shas), profile.name, head,
     )
     return _drain(
@@ -598,24 +598,24 @@ def _load_progress(state: State, profile: Profile, report: Reporter = _noop) -> 
     """
     progress = state.in_progress
     if not progress:
-        raise StateError("незавершённого переноса нет")
+        raise StateError("no unfinished transfer")
     if progress.profile != profile.name:
         report(
-            f"  серия начата как {progress.profile!r}, продолжаем её "
-            f"(сейчас вызвано как {profile.name!r})"
+            f"  series was started as {progress.profile!r}, continuing it "
+            f"(now called as {profile.name!r})"
         )
         logbook.info(
-            "продолжаем серию профиля %s под именем %s", progress.profile, profile.name
+            "continuing series of profile %s under name %s", progress.profile, profile.name
         )
     return progress
 
 
 def _drift_error(progress: Progress, head: str) -> StateError:
     return StateError(
-        "пока перенос стоял на паузе, HEAD ушёл не туда:\n"
-        f"  оставляли {progress.expected_head[:12]}, сейчас {head[:12] or '—'}\n"
-        "Гадать, что из этого перенос, мы не будем. Разберитесь руками; "
-        "забыть незавершённую серию: git-xfer cleanup --state"
+        "HEAD moved while the transfer was paused:\n"
+        f"  left at {progress.expected_head[:12]}, now {head[:12] or '—'}\n"
+        "git-xfer will not guess which of it is the transfer. Sort it out by hand; "
+        "to forget the unfinished series: git-xfer cleanup --state"
     )
 
 
@@ -638,9 +638,9 @@ def _check_head(git: Git, progress: Progress) -> str:
     head = head_sha(git) or ""
     if head != progress.expected_head:
         raise StateError(
-            "HEAD сдвинулся с тех пор, как перенос встал на паузу:\n"
-            f"  ожидали {progress.expected_head[:12]}, а сейчас {head[:12] or '—'}\n"
-            "Разберитесь руками; чтобы забыть незавершённую серию: git-xfer cleanup --state"
+            "HEAD moved since the transfer was paused:\n"
+            f"  expected {progress.expected_head[:12]}, now {head[:12] or '—'}\n"
+            "Sort it out by hand; to forget the unfinished series: git-xfer cleanup --state"
         )
     return head
 
@@ -661,12 +661,12 @@ def resume(
         profile.target_prefix,
     ):
         report(
-            "  подкаталоги в конфиге изменились с начала серии; доигрываем "
-            f"теми, с которыми начинали: {options.source_prefix or 'корень'} → "
-            f"{options.target_prefix or 'корень'}"
+            "  subdirectories in the config changed since the series started; finishing "
+            f"with the original ones: {options.source_prefix or 'root'} → "
+            f"{options.target_prefix or 'root'}"
         )
         logbook.warn(
-            "префиксы серии (%r → %r) разошлись с профилем (%r → %r)",
+            "series prefixes (%r → %r) differ from the profile (%r → %r)",
             options.source_prefix, options.target_prefix,
             profile.source_prefix, profile.target_prefix,
         )
@@ -684,8 +684,8 @@ def resume(
                 # места, где перенос встал: иначе очередь поедет поверх
                 # чужого HEAD, а уже перенесённые коммиты тихо пропадут.
                 _require_expected_head(git, progress)
-            _record(state, progress, outcome, current, SKIPPED, "", detail="пропущен вручную")
-            report(f"  {current[:12]} пропущен")
+            _record(state, progress, outcome, current, SKIPPED, "", detail="skipped by hand")
+            report(f"  {current[:12]} skipped")
         elif in_pick:
             result = git.run(
                 "cherry-pick",
@@ -696,7 +696,7 @@ def resume(
             )
             if not result.ok:
                 raise XferError(
-                    "git cherry-pick --continue не прошёл — конфликт ещё не разрешён:\n"
+                    "git cherry-pick --continue failed, the conflict is not resolved yet:\n"
                     + result.describe()
                 )
             head = head_sha(git) or ""
@@ -707,15 +707,15 @@ def resume(
                 head = own_commit(git, options, _committer_env(git, options, current)) or head
             _record(state, progress, outcome, current, status, head)
             report(
-                f"  {current[:12]} доведён до коммита"
+                f"  {current[:12]} committed"
                 if status == OK
-                else f"  {current[:12]} не дал изменений — пропущен"
+                else f"  {current[:12]} gave no changes, skipped"
             )
         else:
             head = head_sha(git) or ""
             if head == progress.expected_head:
-                _record(state, progress, outcome, current, SKIPPED, "", detail="без изменений")
-                report(f"  {current[:12]} не оставил изменений — пропущен")
+                _record(state, progress, outcome, current, SKIPPED, "", detail="no changes")
+                report(f"  {current[:12]} left no changes, skipped")
             elif _one_commit_ahead(git, progress.expected_head, head):
                 # Человек закоммитил разрешение сам — принимаем как есть.
                 # Авторство и сообщение всё равно наше дело: git, коммитя
@@ -724,8 +724,8 @@ def resume(
                 head = own_commit(
                     git, options, _committer_env(git, options, current)
                 ) or head
-                _record(state, progress, outcome, current, OK, head, detail="закоммичен вручную")
-                report(f"  {current[:12]} уже закоммичен вручную ({head[:12]})")
+                _record(state, progress, outcome, current, OK, head, detail="committed by hand")
+                report(f"  {current[:12]} already committed by hand ({head[:12]})")
             else:
                 raise _drift_error(progress, head)
         progress.expected_head = head_sha(git) or progress.expected_head
@@ -742,12 +742,12 @@ def abort(git: Git, profile: Profile, state: State, report: Reporter = _noop) ->
     if git_path(git, "CHERRY_PICK_HEAD").exists():
         result = git.run("cherry-pick", "--abort", check=False, mutating=True)
         if not result.ok:
-            raise XferError("git cherry-pick --abort не прошёл:\n" + result.describe())
+            raise XferError("git cherry-pick --abort failed:\n" + result.describe())
     projector_for(git, profile, Options.from_json(progress.opts)).unpin()
     done = len(progress.done)
     report(
-        f"Серия прервана. Перенесённых коммитов оставлено: {done}; "
-        f"не применено: {len(progress.queue) + (1 if progress.current else 0)}"
+        f"Series aborted. Transferred commits kept: {done}; "
+        f"not applied: {len(progress.queue) + (1 if progress.current else 0)}"
     )
     state.in_progress = None
     state.save()

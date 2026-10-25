@@ -91,7 +91,7 @@ def parse_selection(spec: str, count: int) -> list[int]:
     """
     spec = spec.strip()
     if not spec:
-        raise SelectionError("пустой выбор")
+        raise SelectionError("empty selection")
     tokens = selection_tokens(spec)
     selected: set[int] = set()
     excluded: set[int] = set()
@@ -102,20 +102,20 @@ def parse_selection(spec: str, count: int) -> list[int]:
             continue
         match = _TOKEN_RE.match(token)
         if not match:
-            raise SelectionError(f"не понимаю {token!r}; ожидается 1, 3-7, !5 или all")
+            raise SelectionError(f"cannot parse {token!r}; expected 1, 3-7, !5 or all")
         start = int(match.group("start"))
         end = int(match.group("end") or start)
         if start > end:
             start, end = end, start
         if start < 1 or end > count:
             raise SelectionError(
-                f"{token!r} выходит за пределы списка (1..{count})"
+                f"{token!r} is out of range (1..{count})"
             )
         target = excluded if match.group("neg") else selected
         target |= set(range(start, end + 1))
     result = sorted(selected - excluded)
     if not result:
-        raise SelectionError("после исключений не осталось ни одного коммита")
+        raise SelectionError("no commits left after exclusions")
     return result
 
 
@@ -187,15 +187,15 @@ def legend(rows: list[Row]) -> str:
 # -- интерактив -----------------------------------------------------------
 
 PROMPT = (
-    "Выбор [1,3,5-7 | all | !N | /текст — фильтр | n/p — страница | q — отмена]: "
+    "Select [1,3,5-7 | all | !N | /text filter | n/p page | q cancel]: "
 )
 
 
 def require_tty() -> None:
     if not sys.stdin.isatty():
         raise XferError(
-            "интерактивный выбор требует терминала. "
-            "В скрипте укажите коммиты явно: --commits 1,3,5-7 или --sha <hash>..."
+            "interactive selection needs a terminal. "
+            "In a script, name the commits: --commits 1,3,5-7 or --sha <hash>..."
         )
 
 
@@ -215,9 +215,9 @@ def choose(rows: list[Row], *, page_size: int = PAGE_SIZE) -> list[Row]:
         for line in render_rows(chunk):
             print(line)
         print()
-        tail = f"страница {page + 1}/{pages}, коммитов {len(view)}"
+        tail = f"page {page + 1}/{pages}, {len(view)} commits"
         if query:
-            tail += f", фильтр /{query}"
+            tail += f", filter /{query}"
         print(f"  {legend(rows)}   ({tail})")
         try:
             answer = input(PROMPT).strip()
@@ -245,7 +245,7 @@ def choose(rows: list[Row], *, page_size: int = PAGE_SIZE) -> list[Row]:
             ] if needle else rows
             page = 0
             if not view:
-                print(f"  Ничего не нашлось по {query!r}")
+                print(f"  Nothing matches {query!r}")
                 view = rows
                 query = ""
             continue

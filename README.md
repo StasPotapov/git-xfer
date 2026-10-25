@@ -63,7 +63,7 @@ a pause. The agent decides *what* to transfer and resolves conflicts.
 
 You need Python ≥ 3.11 (for `tomllib`) and git ≥ 2.45 (for `cherry-pick --empty`).
 `git-xfer doctor` and every `apply` (it runs the same preflight checks) check the git
-version first and fail on an older git with `версия git — X, нужен 2.45+` (git version: X, need 2.45+).
+version first and fail on an older git with ``git version — X, need 2.45+ for `cherry-pick --empty` ``.
 There are no third-party dependencies — only the standard library.
 
 ```bash
@@ -138,7 +138,7 @@ call it from the clone directory: `python3 -m gitxfer …` or `./bin/git-xfer �
 package file directly (`python3 gitxfer/cli.py`). This is not allowed. Recent
 versions answer this with a hint instead of a traceback.
 
-**`нужен Python 3.11 или новее`** (Python 3.11 or newer is needed) — the `python3`
+**`needs Python 3.11 or newer`** — the `python3`
 in `PATH` is too old (on macOS the system one is usually 3.9). Install through
 `uv`/`pipx`, they pin the interpreter, or call `python3.11 -m gitxfer …`.
 
@@ -247,8 +247,8 @@ keep_coauthors = true  # Co-authored-by lines stay in the message
 
 For one run, without editing the config: `--trailer` / `--no-trailer`,
 `--keep-author` / `--reset-author`, `--keep-coauthors` / `--strip-coauthors`.
-`git-xfer status` shows what is in effect now in the lines "Сообщение:"
-(Message) and "Авторство:" (Authorship) — and if a series has already
+`git-xfer status` shows what is in effect now in the lines "Message:"
+and "Authorship:" — and if a series has already
 started, it shows the options of that series: the series finishes with the
 options it started with.
 
@@ -454,7 +454,7 @@ git-xfer status -p myproj --to b          # the profile has master, feature/logi
 git-xfer apply -p myproj --to b --target-branch feature/login --commits 1 --yes
 ```
 
-`status` prints the line `Ветка цели:` (Target branch): it shows both what is written
+`status` prints the line `Target branch:`: it shows both what is written
 in the profile and what is actually checked out. If they differ, `doctor`
 and `apply` stop with code `2` and touch nothing — switch yourself
 or name the checked-out branch with a flag. If the branch does not exist at all, `doctor` says
@@ -495,30 +495,30 @@ A run without arguments asks for the profile and the direction:
 
 ```console
 $ git-xfer apply
-Профиль:
+Profile:
   1. myproj
      /Users/me/dev/repo-a ↔ /Users/me/dev/repo-b  (master)
   2. myproj-release
      /Users/me/dev/repo-a ↔ /Users/me/dev/repo-b  (release/1.x / stable)
-  выбор [1]: 1
-Куда переносим:
+  choice [1]: 1
+Transfer direction:
   1. /Users/me/dev/repo-a (master)  →  /Users/me/dev/repo-b (master)
   2. /Users/me/dev/repo-b (master)  →  /Users/me/dev/repo-a (master)
-  выбор [1]: 1
+  choice [1]: 1
 ```
 
 Then it shows what can be taken:
 
 ```console
- 1 + d772cb8 2024-02-08 Ann Source chore: хвостовой коммит
- 2 + 0f6ff9a 2024-02-06 Ann Source side: ветка
- 3 + a2c0b9a 2024-02-05 Ann Source docs: переименование и правка
- 4 + 47c2151 2024-02-04 Ann Source chore: бинарный ассет
- 5 ≈ bacc39d 2024-02-03 Ann Source общая правка: shared.txt
- 6 + f62bac9 2024-02-02 Ann Source fix: правка app (конфликтует)
+ 1 + d772cb8 2024-02-08 Ann Source chore: trailing commit
+ 2 + 0f6ff9a 2024-02-06 Ann Source side: branch
+ 3 + a2c0b9a 2024-02-05 Ann Source docs: rename and edit
+ 4 + 47c2151 2024-02-04 Ann Source chore: binary asset
+ 5 ≈ bacc39d 2024-02-03 Ann Source shared edit: shared.txt
+ 6 + f62bac9 2024-02-02 Ann Source fix: app edit (conflicts)
 
-  + новый: 5   ≈ совпал patch-id: 1   − уже перенесён: 0   (страница 1/1, коммитов 6)
-Выбор [1,3,5-7 | all | !N | /текст — фильтр | n/p — страница | q — отмена]: 3,4
+  + new: 5   ≈ same patch-id: 1   − already transferred: 0   (page 1/1, 6 commits)
+Select [1,3,5-7 | all | !N | /text filter | n/p page | q cancel]: 3,4
 ```
 
 Empty input means **cancel**, not "select all". The whole input is checked
@@ -528,27 +528,27 @@ Before it does anything, it prints the actual order of application —
 the list is newest-first, like `git log`, and it is applied in reverse:
 
 ```console
-Порядок применения (old → new), коммитов: 2
-    1. 47c2151 chore: бинарный ассет
-    2. a2c0b9a docs: переименование и правка
-Перенести 2 коммит(ов)? [y/N]: y
+Apply order (old → new), commits: 2
+    1. 47c2151 chore: binary asset
+    2. a2c0b9a docs: rename and edit
+Transfer 2 commit(s)? [y/N]: y
 
-[1/2] 47c2151da5f9 chore: бинарный ассет
-[2/2] a2c0b9af6e39 docs: переименование и правка
+[1/2] 47c2151da5f9 chore: binary asset
+[2/2] a2c0b9af6e39 docs: rename and edit
 
-Перенесено: 2; пусто: 0; пропущено: 0
+Transferred: 2; empty: 0; skipped: 0
 ```
 
-Back is the same: at the "Куда переносим" (Where to transfer) step you select the second item.
+Back is the same: at the "Transfer direction:" step you select the second item.
 The utility recognizes transferred commits on both sides and does not send them around in circles:
 
 ```console
 $ git-xfer list -p myproj --to a
- 1 − d3405fd 2024-02-05 Ann Source docs: переименование и правка
- 2 − 7c72adc 2024-02-04 Ann Source chore: бинарный ассет
- 3 + 758dd2e 2024-02-10 Bob Target target: правка app
+ 1 − d3405fd 2024-02-05 Ann Source docs: rename and edit
+ 2 − 7c72adc 2024-02-04 Ann Source chore: binary asset
+ 3 + 758dd2e 2024-02-10 Bob Target target: app edit
 
-  + новый: 1   ≈ совпал patch-id: 0   − уже перенесён: 2
+  + new: 1   ≈ same patch-id: 0   − already transferred: 2
 ```
 
 The full cycle for one side, if you need all steps explicitly:

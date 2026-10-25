@@ -11,10 +11,10 @@ if __package__ in (None, ""):  # запустили файлом, а не как
     import sys as _sys
 
     _sys.exit(
-        "git-xfer: этот файл — часть пакета, отдельно он не запускается.\n"
-        "  из клона:       python3 -m gitxfer ...\n"
-        "  или лаунчером:  ./bin/git-xfer ...\n"
-        "  после установки: git-xfer ..."
+        "git-xfer: this file is part of a package and does not run on its own.\n"
+        "  from a clone:     python3 -m gitxfer ...\n"
+        "  or the launcher:  ./bin/git-xfer ...\n"
+        "  after install:    git-xfer ..."
     )
 
 from . import __version__, logbook
@@ -95,14 +95,14 @@ def _pick(title: str, options: list[tuple[str, str]], default: int = 1) -> int:
             print(f"     {detail}")
     while True:
         try:
-            answer = input(f"  выбор [{default}]: ").strip()
+            answer = input(f"  choice [{default}]: ").strip()
         except EOFError:
             raise KeyboardInterrupt from None
         if not answer:
             return default
         if answer.isdigit() and 1 <= int(answer) <= len(options):
             return int(answer)
-        print(f"    нужно число от 1 до {len(options)}")
+        print(f"    need a number from 1 to {len(options)}")
 
 
 def _choose_pair(config, args: argparse.Namespace):
@@ -114,7 +114,7 @@ def _choose_pair(config, args: argparse.Namespace):
         return config.profiles[names[0]]
     if not sys.stdin.isatty():
         raise ConfigError(
-            "не указан профиль (-p/--profile). Доступны: " + ", ".join(names)
+            "no profile given (-p/--profile). Available: " + ", ".join(names)
         )
     options = []
     for name in names:
@@ -125,7 +125,7 @@ def _choose_pair(config, args: argparse.Namespace):
             else f"{pair.a.branch} / {pair.b.branch}"
         )
         options.append((name, f"{pair.a.path} ↔ {pair.b.path}  ({branches})"))
-    return config.profiles[names[_pick("Профиль:", options) - 1]]
+    return config.profiles[names[_pick("Profile:", options) - 1]]
 
 
 def _choose_direction(pair, args: argparse.Namespace) -> str:
@@ -136,14 +136,14 @@ def _choose_direction(pair, args: argparse.Namespace) -> str:
         return pair.implied
     if not sys.stdin.isatty():
         raise XferError(
-            f"профиль {pair.name!r} описывает пару репозиториев — укажите "
-            "направление: --to a или --to b"
+            f"profile {pair.name!r} describes a pair of repositories; give the "
+            "direction: --to a or --to b"
         )
     options = [
         (f"{pair.a.path} ({pair.a.branch})  →  {pair.b.path} ({pair.b.branch})", ""),
         (f"{pair.b.path} ({pair.b.branch})  →  {pair.a.path} ({pair.a.branch})", ""),
     ]
-    return "b" if _pick("Куда переносим:", options) == 1 else "a"
+    return "b" if _pick("Transfer direction:", options) == 1 else "a"
 
 
 def _current_branch(path: Path | None) -> str | None:
@@ -167,19 +167,19 @@ def _ask(label: str, default: str | None) -> str:
             return answer
         if default:
             return default
-        print("    нужно значение")
+        print("    need a value")
 
 
 def _ask_setup(
     source: Path | None, source_branch: str | None, target: Path | None, target_branch: str | None
 ) -> tuple[Path, str, Path, str]:
     """Спросить направление целиком. Ветка цели по умолчанию — та же, что у источника."""
-    print("Откуда и куда переносим:")
-    source = Path(_ask("репозиторий-источник", str(source) if source else None)).expanduser()
-    source_branch = _ask("ветка источника", source_branch or _current_branch(source))
-    target = Path(_ask("целевой репозиторий", str(target) if target else None)).expanduser()
+    print("Transfer from and to:")
+    source = Path(_ask("source repository", str(source) if source else None)).expanduser()
+    source_branch = _ask("source branch", source_branch or _current_branch(source))
+    target = Path(_ask("target repository", str(target) if target else None)).expanduser()
     target_branch = _ask(
-        "ветка цели", target_branch or _current_branch(target) or source_branch
+        "target branch", target_branch or _current_branch(target) or source_branch
     )
     return source, source_branch, target, target_branch
 
@@ -244,8 +244,8 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
     if args.ask or not (source and target and src_branch and dst_branch):
         if not sys.stdin.isatty():
             raise XferError(
-                "не хватает данных о направлении, а stdin не терминал. "
-                "Задайте профиль (-p) или --source/--target и --branch"
+                "not enough data about the direction, and stdin is not a terminal. "
+                "Give a profile (-p) or --source/--target and --branch"
             )
         source, src_branch, target, dst_branch = _ask_setup(
             source, src_branch, target, dst_branch
@@ -290,7 +290,7 @@ def resolve_profile(args: argparse.Namespace) -> tuple[Profile, object | None]:
 
 def _side_line(path: Path, branch: str, prefix: str) -> str:
     where = f"{path} ({branch})"
-    return f"{where}, подкаталог {prefix}/" if prefix else where
+    return f"{where}, subdirectory {prefix}/" if prefix else where
 
 
 def _checked_out(git: Git) -> str | None:
@@ -309,9 +309,9 @@ def _checked_out(git: Git) -> str | None:
 
 def describe(profile: Profile) -> str:
     return (
-        "Направление: "
+        "Direction: "
         + _side_line(profile.source, profile.source_branch, profile.source_prefix)
-        + "\n          →  "
+        + "\n        →  "
         + _side_line(profile.target, profile.target_branch, profile.target_prefix)
     )
 
@@ -321,7 +321,7 @@ class Context:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.profile, self.config = resolve_profile(args)
-        logbook.info("направление: %s", self.profile.describe_short())
+        logbook.info("direction: %s", self.profile.describe_short())
         # Без конфига (разовый прогон) действует дефолт самой обёртки.
         timeout = self.config.git_timeout if self.config else DEFAULT_GIT_TIMEOUT
         self.target = Git(
@@ -340,13 +340,13 @@ class Context:
         if self.args.dry_run:
             # Подтянуть их молча нельзя — это запись в репозиторий.
             raise XferError(
-                f"объектов источника нет ({self.profile.ref}), а --dry-run не даёт их "
-                f"подтянуть. Выполните сначала: git-xfer sync -p {self.profile.name}"
+                f"source objects are missing ({self.profile.ref}), and --dry-run does not let "
+                f"fetch them. Run first: git-xfer sync -p {self.profile.name}"
             )
-        eprint(f"Объекты источника ещё не перенесены, выполняю sync ({self.profile.ref})")
+        eprint(f"Source objects are not fetched yet, running sync ({self.profile.ref})")
         sync(self.target, self.profile)
         if not has_ref(self.target, self.profile.ref):
-            raise XferError(f"не удалось создать {self.profile.ref}")
+            raise XferError(f"cannot create {self.profile.ref}")
 
     def survey(self, *, limit: int | None = None, use_patch_id: bool = True) -> Survey:
         result = survey(
@@ -406,25 +406,25 @@ def _vet_skipped(context: Context, rows: list[Row]) -> list[Row]:
         for row in marked
     ]
     logbook.info(
-        "под правилами skip: %s", ", ".join(row.commit.short for row in marked)
+        "under skip rules: %s", ", ".join(row.commit.short for row in marked)
     )
     if _bulk_selection(args):
-        print("Не берём — под правилами skip из конфига:")
+        print("Not taken, under skip rules from the config:")
         print("\n".join(listing))
-        print("  (взять и их: назовите номера явно и добавьте --include-skipped)")
+        print("  (to take them too: name the numbers explicitly and add --include-skipped)")
         return kept
     if sys.stdin.isatty():
-        print("Среди выбранных — коммиты под правилами skip из конфига:")
+        print("The selection has commits under skip rules from the config:")
         print("\n".join(listing))
-        if confirm("Точно переносить и их?", assume_yes=False):
+        if confirm("Transfer them too?", assume_yes=False):
             return rows
-        print("Их не берём")
+        print("Not taking them")
         return kept
     raise XferError(
-        "среди выбранных — коммиты под правилами skip из конфига:\n"
+        "the selection has commits under skip rules from the config:\n"
         + "\n".join(listing)
-        + "\nПереносить их по умолчанию не положено. Если это осознанно — "
-        "добавьте --include-skipped"
+        + "\nThey are not transferred by default. If this is intended, "
+        "add --include-skipped"
     )
 
 
@@ -441,7 +441,7 @@ def _selected_rows(context: Context, view: Survey) -> list[Row]:
     if sys.stdin.isatty():
         return choose(view.rows)
     raise XferError(
-        "нечего выбирать: stdin не терминал. Укажите --commits 1,3,5-7 или --sha <hash>..."
+        "nothing to select from: stdin is not a terminal. Give --commits 1,3,5-7 or --sha <hash>..."
     )
 
 
@@ -453,9 +453,9 @@ def rows_by_sha(context: Context, view: Survey, shas: list[str]) -> list[Row]:
             "rev-parse", "--verify", "--quiet", f"{raw}^{{commit}}", check=False
         ).text
         if not full:
-            raise XferError(f"{raw!r} — не коммит в целевом репозитории (сделайте sync)")
+            raise XferError(f"{raw!r} is not a commit in the target repository (run sync)")
         if not context.target.ok("merge-base", "--is-ancestor", full, context.profile.ref):
-            raise XferError(f"{raw!r} не принадлежит ветке источника {context.profile.ref}")
+            raise XferError(f"{raw!r} is not on the source branch {context.profile.ref}")
         row = known.get(full)
         if row is None:
             # Строки нет в таблице: коммит либо вне окна --limit, либо —
@@ -496,9 +496,9 @@ def rows_by_sha(context: Context, view: Survey, shas: list[str]) -> list[Row]:
                 commit=commit,
                 status=NEW,
                 reason=(
-                    f"вне подкаталога {context.profile.source_prefix}/"
+                    f"outside subdirectory {context.profile.source_prefix}/"
                     if outside
-                    else "вне окна --limit"
+                    else "outside the --limit window"
                 ),
                 partial=partial and not outside,
                 skipped=skip.reason(full, commit.subject, files),
@@ -511,7 +511,7 @@ def confirm(question: str, *, assume_yes: bool) -> bool:
     if assume_yes:
         return True
     if not sys.stdin.isatty():
-        raise XferError("нужно подтверждение, но stdin не терминал. Добавьте --yes")
+        raise XferError("confirmation needed, but stdin is not a terminal. Add --yes")
     try:
         answer = input(f"{question} [y/N]: ").strip().lower()
     except EOFError:
@@ -527,7 +527,7 @@ def print_order(context: Context, commits: list[Commit]) -> list[Commit]:
     index = {commit.sha: commit for commit in commits}
     ordered = [index[sha] for sha in ordered_shas]
     print()
-    print(f"Порядок применения (old → new), коммитов: {len(ordered)}")
+    print(f"Apply order (old → new), commits: {len(ordered)}")
     for position, commit in enumerate(ordered, start=1):
         print(f"  {position:>3}. {commit.short} {commit.subject}")
     return ordered
@@ -539,31 +539,31 @@ def print_order(context: Context, commits: list[Commit]) -> list[Commit]:
 def cmd_init(args: argparse.Namespace) -> int:
     path, created = write_template(args.config, force=args.force)
     if created:
-        print(f"Создан шаблон конфига: {path}")
-        print("Опишите профили и запустите: git-xfer doctor -p <профиль>")
+        print(f"Created config template: {path}")
+        print("Describe the profiles and run: git-xfer doctor -p <profile>")
     else:
-        print(f"Конфиг уже существует: {path} (перезаписать — init --force)")
+        print(f"Config already exists: {path} (to overwrite: init --force)")
     return EXIT_OK
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     context = Context(args)
     profile = context.profile
-    print(f"Профиль: {profile.name}")
+    print(f"Profile: {profile.name}")
     print(describe(profile))
     report = run_preflight(context.target, context.source, profile)
     print(report.render())
     if context.state.in_progress:
         progress = context.state.in_progress
         print(
-            f"  ! незавершённый перенос: сделано {len(progress.done)}, "
-            f"осталось {len(progress.queue) + (1 if progress.current else 0)}"
+            f"  ! unfinished transfer: done {len(progress.done)}, "
+            f"left {len(progress.queue) + (1 if progress.current else 0)}"
         )
     print()
     if report.failures:
-        print(f"Не готово: блокирующих проблем {len(report.failures)}")
+        print(f"Not ready: blocking problems: {len(report.failures)}")
         return EXIT_PREFLIGHT
-    print(f"Готово к переносу. Предупреждений: {len(report.warnings)}")
+    print(f"Ready to transfer. Warnings: {len(report.warnings)}")
     return EXIT_OK
 
 
@@ -575,7 +575,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if args.dry_run:
         return EXIT_OK
     if before == sha:
-        print(f"{profile.ref} без изменений: {sha[:12]}")
+        print(f"{profile.ref} unchanged: {sha[:12]}")
     else:
         print(f"{profile.ref}: {before[:12] or '—'} → {sha[:12]}")
     return EXIT_OK
@@ -592,16 +592,16 @@ def cmd_list(args: argparse.Namespace) -> int:
         hidden = sum(1 for row in rows if row.status == NEW and row.skipped)
         rows = [row for row in rows if row.status == NEW and not row.skipped]
     if not rows:
-        print("Коммитов не найдено")
+        print("No commits found")
         if hidden:
-            print(f"  скрыто по правилам skip: {hidden} (без --new видно всё)")
+            print(f"  hidden by skip rules: {hidden} (without --new everything is shown)")
         return EXIT_OK
     for line in render_rows(rows):
         print(line)
     print()
     print(f"  {legend(view.rows)}")
     if hidden:
-        print(f"  скрыто по правилам skip: {hidden} (без --new видно всё)")
+        print(f"  hidden by skip rules: {hidden} (without --new everything is shown)")
     return EXIT_OK
 
 
@@ -611,14 +611,14 @@ def _print_notes(comparison: Comparison) -> None:
     for row in comparison.missing:
         detail = comparison.details[row.commit.sha]
         if detail.in_sync:
-            notes.append(f"{row.number}: его файлы уже совпадают по обе стороны")
+            notes.append(f"{row.number}: its files already match on both sides")
         if detail.overlaps:
             notes.append(
-                f"{row.number}: те же файлы правили только в цели — "
+                f"{row.number}: the same files were changed only in the target: "
                 + ", ".join(detail.overlaps)
             )
         if detail.after_last_transferred is False:
-            notes.append(f"{row.number}: старше последнего перенесённого")
+            notes.append(f"{row.number}: older than the last transferred one")
     for note in notes:
         print(f"  {note}")
 
@@ -644,42 +644,42 @@ def cmd_compare(args: argparse.Namespace) -> int:
     for warning in result.warnings:
         eprint(f"  ! {warning}")
     print(describe(profile))
-    print(f"Смотрим по {result.limit} последних коммитов каждой стороны (--limit)")
+    print(f"Looking at the last {result.limit} commits of each side (--limit)")
     print()
     files = result.files
     if files.paths:
         print(
-            f"Файлы проекта сейчас: отличаются {len(files.differ)}, "
-            f"только в источнике {len(files.source_only)}, "
-            f"только в цели {len(files.target_only)}"
+            f"Project files now: differ {len(files.differ)}, "
+            f"only in source {len(files.source_only)}, "
+            f"only in target {len(files.target_only)}"
         )
         if args.files:
             for title, paths in (
-                ("отличаются", files.differ),
-                ("только в источнике", files.source_only),
-                ("только в цели", files.target_only),
+                ("differ", files.differ),
+                ("only in source", files.source_only),
+                ("only in target", files.target_only),
             ):
                 if paths:
                     print(f"  {title}:")
                     for path in paths:
                         print(f"    {path}")
         else:
-            print("  (список — --files)")
+            print("  (list them: --files)")
     else:
-        print("Файлы проекта сейчас совпадают")
+        print("Project files now match")
 
     print()
     missing = result.missing
     if missing:
-        print(f"Нет в цели: {len(missing)}  (номера — как у list, годятся в --commits)")
+        print(f"Missing in target: {len(missing)}  (numbers as in list, usable in --commits)")
         for line in render_rows(missing):
             print(line)
         _print_notes(result)
     else:
-        print("Нет в цели: ничего")
+        print("Missing in target: none")
     if result.skipped:
         print()
-        print(f"Не переносим по правилам skip: {len(result.skipped)}")
+        print(f"Excluded by skip rules: {len(result.skipped)}")
         for line in render_rows(result.skipped):
             print(line)
         for row in result.skipped:
@@ -689,23 +689,23 @@ def cmd_compare(args: argparse.Namespace) -> int:
     target_only = result.target_only
     if target_only:
         similar = sum(1 for row in target_only if row.status == SIMILAR)
-        title = f"Есть только в цели: {len(target_only) - similar}"
+        title = f"Only in target: {len(target_only) - similar}"
         if similar:
-            title += f", и ещё {similar} ≈ — похоже, есть и в источнике"
+            title += f", plus {similar} ≈ that seem to be in the source too"
         print(title)
         # Номера — окна цели: те же, что у list в обратную сторону.
-        print(f"  (номера — как у list --to {profile.source_key})")
+        print(f"  (numbers as in list --to {profile.source_key})")
         for line in render_rows(target_only):
             print(line)
     else:
-        print("Есть только в цели: ничего")
+        print("Only in target: none")
 
     print()
-    print(f"Уже перенесено из окна источника: {result.transferred}")
+    print(f"Already transferred from the source window: {result.transferred}")
     print(f"  {legend(result.forward.rows)}")
     if len(result.forward.rows) >= result.limit:
         print(
-            f"  старше {result.limit} коммитов не смотрели — --limit {result.limit * 2}"
+            f"  commits older than {result.limit} were not checked: --limit {result.limit * 2}"
         )
     return EXIT_OK
 
@@ -716,7 +716,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     view = context.survey(limit=args.limit, use_patch_id=not args.no_patch_id)
     rows = resolve_rows(context, view)
     if not rows:
-        print("Ничего не выбрано")
+        print("Nothing selected")
         return EXIT_OK
     ordered = print_order(context, [row.commit for row in rows])
     # Прогноз — от ветки цели, как у list и compare, а не от выгруженной:
@@ -727,30 +727,30 @@ def cmd_plan(args: argparse.Namespace) -> int:
         "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}", check=False
     ).text
     if not head:
-        raise XferError("в целевой ветке нет коммитов")
+        raise XferError("the target branch has no commits")
     result = dry_run(
         context.target, head, ordered, projector_for(context.target, context.profile)
     )
     print()
-    print("Сухой прогон (рабочее дерево не тронуто):")
+    print("Dry run (work tree not touched):")
     for position, step in enumerate(result.steps, start=1):
         if step.conflicts:
             print(f"  {position:>3}. ✗ {step.commit.short} {step.commit.subject}")
             for path in step.conflicts:
-                print(f"        конфликт: {path}")
+                print(f"        conflict: {path}")
         elif step.empty:
-            print(f"  {position:>3}. ∅ {step.commit.short} {step.commit.subject} — станет пустым")
+            print(f"  {position:>3}. ∅ {step.commit.short} {step.commit.subject} — will become empty")
         else:
             print(f"  {position:>3}. ✓ {step.commit.short} {step.commit.subject}")
     print()
     conflicted = result.conflicted
     if conflicted:
         print(
-            f"Конфликтов ожидается: {len(conflicted)} из {len(result.steps)}. "
-            "После первого конфликта предсказание приблизительно."
+            f"Conflicts expected: {len(conflicted)} of {len(result.steps)}. "
+            "After the first conflict the prediction is approximate."
         )
     else:
-        print(f"Конфликтов не ожидается, коммитов: {len(result.steps)}")
+        print(f"No conflicts expected, commits: {len(result.steps)}")
     return EXIT_OK
 
 
@@ -762,8 +762,8 @@ def _options(args: argparse.Namespace, profile: Profile) -> Options:
     message = (args.message or "").strip()
     if message and not squash:
         raise XferError(
-            "--message задаёт сообщение схлопнутого коммита и без --squash "
-            "ничего не значит: сообщения переносимых коммитов не переписываются"
+            "--message sets the message of the squashed commit and means nothing "
+            "without --squash: messages of transferred commits are not rewritten"
         )
     return Options(
         trailer=profile.trailer if args.trailer is None else args.trailer,
@@ -783,7 +783,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if args.dry_run:
         # Под --dry-run cherry-pick не выполняется, HEAD не двигается,
         # и каждый коммит выглядел бы пустым. Сухой прогон — это plan.
-        raise XferError("для сухого прогона есть отдельная подкоманда: git-xfer plan")
+        raise XferError("use the separate subcommand for a dry run: git-xfer plan")
     context = Context(args)
     # Проверки раньше fetch: незачем тащить объекты в репозиторий,
     # который мы тут же признаем непригодным.
@@ -796,23 +796,23 @@ def cmd_apply(args: argparse.Namespace) -> int:
     view = context.survey(limit=args.limit, use_patch_id=not args.no_patch_id)
     rows = resolve_rows(context, view)
     if not rows:
-        print("Ничего не выбрано")
+        print("Nothing selected")
         return EXIT_OK
     marked = [row for row in rows if row.status != NEW]
     if marked:
         print()
-        print("Внимание, среди выбранных есть уже перенесённые:")
+        print("Warning, the selection has commits that were already transferred:")
         for row in marked:
             print(f"  {row.status} {row.commit.short} {row.commit.subject} — {row.reason}")
     ordered = print_order(context, [row.commit for row in rows])
     options = _options(args, context.profile)
     question = (
-        f"Перенести {len(ordered)} коммит(ов) ОДНИМ коммитом?"
+        f"Transfer {len(ordered)} commit(s) as ONE commit?"
         if options.squash and len(ordered) > 1
-        else f"Перенести {len(ordered)} коммит(ов)?"
+        else f"Transfer {len(ordered)} commit(s)?"
     )
     if not confirm(question, assume_yes=args.yes):
-        print("Отменено")
+        print("Cancelled")
         return EXIT_OK
     print()
     outcome = start(
@@ -829,17 +829,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
 def _summary(outcome) -> int:
     print()
     print(
-        f"Перенесено: {outcome.count('ok')}; "
-        f"пусто: {outcome.count('empty')}; пропущено: {outcome.count('skipped')}"
+        f"Transferred: {outcome.count('ok')}; "
+        f"empty: {outcome.count('empty')}; skipped: {outcome.count('skipped')}"
     )
     if outcome.squashed:
         print(
-            f"Схлопнуто в один коммит: {outcome.squashed[:12]} "
-            f"({outcome.squashed_count} коммит(ов))"
+            f"Squashed into one commit: {outcome.squashed[:12]} "
+            f"({outcome.squashed_count} commit(s))"
         )
     if outcome.conflict:
-        print(f"Остановлено на {outcome.conflict[:12]}, в очереди ещё {len(outcome.remaining)}")
-        print("Дальше: git-xfer continue | skip | abort")
+        print(f"Stopped at {outcome.conflict[:12]}, {len(outcome.remaining)} more in queue")
+        print("Next: git-xfer continue | skip | abort")
     return outcome.exit_code
 
 
@@ -865,32 +865,32 @@ def cmd_status(args: argparse.Namespace) -> int:
     context = Context(args)
     profile = context.profile
     progress = context.state.in_progress
-    print(f"Профиль: {profile.name}")
+    print(f"Profile: {profile.name}")
     print(describe(profile))
     # Ветка цели — первое, что нужно решить перед переносом, и чаще всего
     # выгружена не та, что записана в профиле. Печатаем обе: из одного
     # `status` должно быть видно, куда коммиты лягут на самом деле.
     checked_out = _checked_out(context.target)
     if checked_out == profile.target_branch:
-        print(f"Ветка цели: {profile.target_branch} (выгружена)")
+        print(f"Target branch: {profile.target_branch} (checked out)")
     elif checked_out is None:
         print(
-            f"Ветка цели: в профиле {profile.target_branch}, "
-            f"а что выгружено — прочитать не вышло. Подробности: git-xfer doctor"
+            f"Target branch: {profile.target_branch} in the profile, "
+            f"cannot read what is checked out. Details: git-xfer doctor"
         )
     else:
         # Именно «остановится», а не «перенесёт куда попало»: расхождение
         # ветки — это FAIL предполётной проверки, и apply не начнётся.
         print(
-            f"Ветка цели: в профиле {profile.target_branch}, "
-            f"сейчас выгружена {checked_out} — перенос в таком виде "
-            f"остановится (код 2). Переносить в выгруженную: "
+            f"Target branch: {profile.target_branch} in the profile, "
+            f"{checked_out} is checked out; a transfer like this "
+            f"stops (exit code 2). To transfer into the checked-out one: "
             f"--target-branch {checked_out}"
         )
     print(f"State:   {state_path(profile.target)}")
-    print(f"Журнал:  {logbook.path() or 'выключен'}")
+    print(f"Log:     {logbook.path() or 'off'}")
     policy = context.config.resolve_conflicts if context.config else DEFAULT_RESOLVE
-    print(f"Конфликты: {policy} (политика для скилла, не для самой утилиты)")
+    print(f"Conflicts: {policy} (policy for the skill, not for the tool itself)")
     # У начатой серии режим свой: она доигрывается теми опциями, с которыми
     # начиналась, даже если конфиг тем временем поправили. Показывать здесь
     # конфиг значило бы соврать ровно там, где за ответом и приходят.
@@ -899,48 +899,48 @@ def cmd_status(args: argparse.Namespace) -> int:
     keep_author = started.keep_author if started else profile.keep_author
     keep_coauthors = started.keep_coauthors if started else profile.keep_coauthors
     squash = started.squash if started else profile.squash
-    whose = " (серия начата с ними)" if started else ""
+    whose = " (the series started with these)" if started else ""
     print(
-        "Сообщение: "
+        "Message: "
         + (
-            "+ трейлер (cherry picked from commit ...)"
+            "+ trailer (cherry picked from commit ...)"
             if trailer
-            else "без трейлера"
+            else "no trailer"
         )
         + (
-            ", строки Co-authored-by остаются (keep_coauthors)"
+            ", Co-authored-by lines are kept (keep_coauthors)"
             if keep_coauthors
-            else ", строки Co-authored-by вырезаются"
+            else ", Co-authored-by lines are stripped"
         )
         + whose
     )
     print(
-        "Авторство: "
+        "Authorship: "
         + (
-            "автор исходного коммита сохраняется (keep_author)"
+            "the original commit author is kept (keep_author)"
             if keep_author
-            else "автором станет тот, кто переносит"
+            else "the person who transfers becomes the author"
         )
         + whose
     )
     print(
-        "Схлопывание: "
-        + ("вся серия в один коммит (squash)" if squash else "коммит в коммит")
+        "Squash: "
+        + ("the whole series into one commit (squash)" if squash else "commit by commit")
         + whose
     )
     if not progress:
-        print("Незавершённого переноса нет")
+        print("No unfinished transfer")
         return EXIT_OK
     head = head_sha(context.target) or "—"
-    print(f"Начат: {progress.started_at}, профиль {progress.profile}")
-    print(f"  сделано {len(progress.done)}, в очереди {len(progress.queue)}")
+    print(f"Started: {progress.started_at}, profile {progress.profile}")
+    print(f"  done {len(progress.done)}, in queue {len(progress.queue)}")
     if progress.current:
-        print(f"  остановлен на {progress.current[:12]}")
-    print(f"  HEAD до начала: {progress.head_before[:12]}")
-    print(f"  HEAD ожидаемый: {progress.expected_head[:12]}, фактический: {head[:12]}")
+        print(f"  stopped at {progress.current[:12]}")
+    print(f"  HEAD before start: {progress.head_before[:12]}")
+    print(f"  HEAD expected: {progress.expected_head[:12]}, actual: {head[:12]}")
     if head != progress.expected_head:
-        print("  ! HEAD не там, где мы его оставили — перенос трогали руками")
-        print("    забыть незавершённую серию: git-xfer cleanup --state")
+        print("  ! HEAD is not where git-xfer left it; the transfer was changed by hand")
+        print("    to forget the unfinished series: git-xfer cleanup --state")
     return EXIT_OK
 
 
@@ -949,8 +949,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     profile = context.profile
     if context.state.in_progress and not args.state:
         raise XferError(
-            "есть незавершённый перенос; сначала continue/skip/abort "
-            "или добавьте --state, чтобы забыть его"
+            "a transfer is unfinished; first continue/skip/abort "
+            "or add --state to forget it"
         )
     refs = stale_xfer_refs(context.target) if args.all else []
     if not args.all:
@@ -962,20 +962,20 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     for ref in refs:
         context.target.run("update-ref", "-d", ref, mutating=True)
         if not args.dry_run:
-            print(f"Удалён {ref}")
+            print(f"Deleted {ref}")
     if not refs:
-        print("Ссылок refs/xfer/* не найдено")
+        print("No refs/xfer/* refs found")
     if args.state:
         path = state_path(profile.target)
         if args.dry_run:
-            print(f"[dry-run] удалить {path}")
+            print(f"[dry-run] delete {path}")
         elif path.exists():
             path.unlink()
-            print(f"Удалён state {path}")
+            print(f"Deleted state {path}")
         else:
-            print("State-файла нет")
+            print("No state file")
     if refs and not args.dry_run:
-        print("Объекты источника станут недостижимы; освободит их git gc")
+        print("Source objects become unreachable; git gc will free them")
     return EXIT_OK
 
 
@@ -984,57 +984,57 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
 def _add_repo_flags(parser: argparse.ArgumentParser) -> None:
     """Направление и разовые переопределения — без правки конфига."""
-    group = parser.add_argument_group("направление")
+    group = parser.add_argument_group("direction")
     group.add_argument(
         "--to",
         choices=("a", "b"),
-        help="в какую сторону пары переносим; без флага спросим",
+        help="which side of the pair to transfer to; asked if not given",
     )
     group.add_argument(
-        "-b", "--branch", metavar="NAME", help="ветка с обеих сторон, разово"
+        "-b", "--branch", metavar="NAME", help="branch on both sides, one-off"
     )
-    group.add_argument("--source-branch", metavar="NAME", help="ветка источника")
+    group.add_argument("--source-branch", metavar="NAME", help="source branch")
     group.add_argument(
-        "--target-branch", metavar="NAME", help="ветка цели (по умолчанию та же)"
-    )
-    group.add_argument(
-        "--source", type=Path, metavar="PATH", help="репозиторий-источник, мимо конфига"
+        "--target-branch", metavar="NAME", help="target branch (same by default)"
     )
     group.add_argument(
-        "--target", type=Path, metavar="PATH", help="целевой репозиторий, мимо конфига"
+        "--source", type=Path, metavar="PATH", help="source repository, bypassing the config"
+    )
+    group.add_argument(
+        "--target", type=Path, metavar="PATH", help="target repository, bypassing the config"
     )
     group.add_argument(
         "--source-prefix",
         metavar="DIR",
-        help="подкаталог источника, в котором лежит проект",
+        help="source subdirectory that holds the project",
     )
     group.add_argument(
         "--target-prefix",
         metavar="DIR",
-        help="подкаталог цели, в который класть проект",
+        help="target subdirectory to put the project in",
     )
     group.add_argument(
-        "--ask", action="store_true", help="спросить репозитории и ветки интерактивно"
+        "--ask", action="store_true", help="ask for repositories and branches interactively"
     )
 
 
 def _add_profile(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-p", "--profile", help="имя профиля из конфига")
+    parser.add_argument("-p", "--profile", help="profile name from the config")
     _add_repo_flags(parser)
 
 
 def _add_selection(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-i", "--interactive", action="store_true", help="выбрать коммиты из списка")
-    parser.add_argument("--commits", help="номера из списка: 1,3,5-7 (можно !5 и all)")
-    parser.add_argument("--sha", nargs="+", metavar="SHA", help="коммиты источника по хешу")
-    parser.add_argument("--limit", type=int, help="сколько коммитов показывать")
-    parser.add_argument("--no-patch-id", action="store_true", help="не считать patch-id (быстрее)")
+    parser.add_argument("-i", "--interactive", action="store_true", help="select commits from a list")
+    parser.add_argument("--commits", help="numbers from the list: 1,3,5-7 (also !5 and all)")
+    parser.add_argument("--sha", nargs="+", metavar="SHA", help="source commits by hash")
+    parser.add_argument("--limit", type=int, help="how many commits to show")
+    parser.add_argument("--no-patch-id", action="store_true", help="do not compute patch-id (faster)")
     parser.add_argument(
-        "--allow-merges", action="store_true", help="показывать и переносить merge-коммиты"
+        "--allow-merges", action="store_true", help="show and transfer merge commits too"
     )
     parser.add_argument(
         "--include-skipped", action="store_true",
-        help="брать и коммиты под правилами skip из конфига",
+        help="take commits under skip rules from the config too",
     )
 
 
@@ -1044,7 +1044,7 @@ class Parser(argparse.ArgumentParser):
 
     def error(self, message: str):  # noqa: D102
         self.print_usage(sys.stderr)
-        eprint(f"{self.prog}: ошибка: {message}")
+        eprint(f"{self.prog}: error: {message}")
         raise SystemExit(EXIT_USAGE)
 
 
@@ -1060,41 +1060,41 @@ def _add_common(parser: argparse.ArgumentParser, *, after_command: bool) -> None
         "--config",
         type=Path,
         default=hidden if after_command else None,
-        help=f"путь к конфигу (по умолчанию {config_path()})",
+        help=f"config path (default {config_path()})",
     )
     parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         default=hidden if after_command else False,
-        help="печатать вызовы git",
+        help="print git calls",
     )
     parser.add_argument(
         "-n",
         "--dry-run",
         action="store_true",
         default=hidden if after_command else False,
-        help="не выполнять команды, меняющие репозиторий",
+        help="do not run commands that change the repository",
     )
     parser.add_argument(
         "--no-log",
         action="store_true",
         default=hidden if after_command else False,
-        help="не вести журнал прогона",
+        help="do not write the run log",
     )
     parser.add_argument(
         "--log-file",
         type=Path,
         default=hidden if after_command else None,
         metavar="PATH",
-        help="куда писать журнал (по умолчанию рядом со state)",
+        help="where to write the log (default: next to the state)",
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = Parser(
         prog="git-xfer",
-        description="Перенос коммитов между несвязанными git-репозиториями.",
+        description="Transfer commits between unrelated git repositories.",
     )
     parser.add_argument("--version", action="version", version=f"git-xfer {__version__}")
     _add_common(parser, after_command=False)
@@ -1102,121 +1102,121 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(common, after_command=True)
     subparsers = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
 
-    init = subparsers.add_parser("init", help="создать шаблон конфига", parents=[common])
-    init.add_argument("--force", action="store_true", help="перезаписать существующий")
+    init = subparsers.add_parser("init", help="create a config template", parents=[common])
+    init.add_argument("--force", action="store_true", help="overwrite the existing one")
     init.set_defaults(func=cmd_init)
 
-    doctor = subparsers.add_parser("doctor", help="предполётные проверки", parents=[common])
+    doctor = subparsers.add_parser("doctor", help="preflight checks", parents=[common])
     _add_profile(doctor)
     doctor.set_defaults(func=cmd_doctor)
 
-    sync_cmd = subparsers.add_parser("sync", help="перенести объекты source → target", parents=[common])
+    sync_cmd = subparsers.add_parser("sync", help="fetch objects source → target", parents=[common])
     _add_profile(sync_cmd)
     sync_cmd.set_defaults(func=cmd_sync)
 
-    list_cmd = subparsers.add_parser("list", help="таблица коммитов источника", parents=[common])
+    list_cmd = subparsers.add_parser("list", help="table of source commits", parents=[common])
     _add_profile(list_cmd)
-    list_cmd.add_argument("--limit", type=int, help="сколько коммитов показывать")
-    list_cmd.add_argument("--new", action="store_true", help="только непереносившиеся")
-    list_cmd.add_argument("--no-patch-id", action="store_true", help="не считать patch-id")
+    list_cmd.add_argument("--limit", type=int, help="how many commits to show")
+    list_cmd.add_argument("--new", action="store_true", help="only commits not transferred yet")
+    list_cmd.add_argument("--no-patch-id", action="store_true", help="do not compute patch-id")
     list_cmd.add_argument(
-        "--allow-merges", action="store_true", help="показывать и merge-коммиты"
+        "--allow-merges", action="store_true", help="show merge commits too"
     )
     list_cmd.set_defaults(func=cmd_list)
 
     compare_cmd = subparsers.add_parser(
-        "compare", help="чего нет в цели и что есть только в ней", parents=[common]
+        "compare", help="what is missing in the target and what is only there", parents=[common]
     )
     _add_profile(compare_cmd)
-    compare_cmd.add_argument("--limit", type=int, help="сколько коммитов смотреть с каждой стороны")
-    compare_cmd.add_argument("--json", action="store_true", help="вывод для агента и скриптов")
-    compare_cmd.add_argument("--files", action="store_true", help="перечислить различающиеся файлы")
-    compare_cmd.add_argument("--no-patch-id", action="store_true", help="не считать patch-id")
+    compare_cmd.add_argument("--limit", type=int, help="how many commits to check on each side")
+    compare_cmd.add_argument("--json", action="store_true", help="output for agents and scripts")
+    compare_cmd.add_argument("--files", action="store_true", help="list the differing files")
+    compare_cmd.add_argument("--no-patch-id", action="store_true", help="do not compute patch-id")
     compare_cmd.add_argument(
-        "--allow-merges", action="store_true", help="показывать и merge-коммиты"
+        "--allow-merges", action="store_true", help="show merge commits too"
     )
     compare_cmd.set_defaults(func=cmd_compare)
 
-    plan_cmd = subparsers.add_parser("plan", help="сухой прогон: где будут конфликты", parents=[common])
+    plan_cmd = subparsers.add_parser("plan", help="dry run: where conflicts will be", parents=[common])
     _add_profile(plan_cmd)
     _add_selection(plan_cmd)
     plan_cmd.set_defaults(func=cmd_plan)
 
-    apply_cmd = subparsers.add_parser("apply", help="перенести выбранные коммиты", parents=[common])
+    apply_cmd = subparsers.add_parser("apply", help="transfer the selected commits", parents=[common])
     _add_profile(apply_cmd)
     _add_selection(apply_cmd)
-    apply_cmd.add_argument("--yes", action="store_true", help="не спрашивать подтверждения")
+    apply_cmd.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     trailer = apply_cmd.add_mutually_exclusive_group()
     trailer.add_argument(
         "--trailer", dest="trailer", action="store_true", default=None,
-        help="дописать (cherry picked from commit ...) — надёжная дедупликация",
+        help="append (cherry picked from commit ...) for reliable dedup",
     )
     trailer.add_argument(
         "--no-trailer", dest="trailer", action="store_false",
-        help="не трогать сообщение коммита (по умолчанию)",
+        help="leave the commit message as is (default)",
     )
     apply_cmd.add_argument(
         "--empty", choices=("drop", "keep", "stop"), default="drop",
-        help="что делать с коммитом, ставшим пустым",
+        help="what to do with a commit that became empty",
     )
-    apply_cmd.add_argument("--hooks", action="store_true", help="не отключать хуки")
-    apply_cmd.add_argument("--gpg-sign", action="store_true", help="подписывать коммиты")
+    apply_cmd.add_argument("--hooks", action="store_true", help="do not turn off hooks")
+    apply_cmd.add_argument("--gpg-sign", action="store_true", help="sign commits")
     apply_cmd.add_argument(
-        "--keep-committer-date", action="store_true", help="сохранить committer date источника"
+        "--keep-committer-date", action="store_true", help="keep the source committer date"
     )
     squash = apply_cmd.add_mutually_exclusive_group()
     squash.add_argument(
         "--squash", dest="squash", action="store_true", default=None,
-        help="схлопнуть выбранные коммиты в один",
+        help="squash the selected commits into one",
     )
     squash.add_argument(
         "--no-squash", dest="squash", action="store_false",
-        help="перенести коммит в коммит (по умолчанию)",
+        help="transfer commit by commit (default)",
     )
     apply_cmd.add_argument(
         "--message", metavar="TEXT",
-        help="сообщение схлопнутого коммита; без него — сообщения серии подряд",
+        help="message of the squashed commit; without it, the series messages in order",
     )
     author = apply_cmd.add_mutually_exclusive_group()
     author.add_argument(
         "--keep-author", dest="keep_author", action="store_true", default=None,
-        help="оставить автором автора исходного коммита",
+        help="keep the original commit author as author",
     )
     author.add_argument(
         "--reset-author", dest="keep_author", action="store_false",
-        help="автор — тот, кто переносит (по умолчанию)",
+        help="the person who transfers is the author (default)",
     )
     coauthors = apply_cmd.add_mutually_exclusive_group()
     coauthors.add_argument(
         "--keep-coauthors", dest="keep_coauthors", action="store_true", default=None,
-        help="оставить в сообщении строки Co-authored-by",
+        help="keep Co-authored-by lines in the message",
     )
     coauthors.add_argument(
         "--strip-coauthors", dest="keep_coauthors", action="store_false",
-        help="вырезать строки Co-authored-by (по умолчанию)",
+        help="strip Co-authored-by lines (default)",
     )
     apply_cmd.set_defaults(func=cmd_apply)
 
-    cont = subparsers.add_parser("continue", help="продолжить после разрешения конфликта", parents=[common])
+    cont = subparsers.add_parser("continue", help="continue after resolving a conflict", parents=[common])
     _add_profile(cont)
     cont.set_defaults(func=cmd_continue)
 
-    skip_cmd = subparsers.add_parser("skip", help="пропустить конфликтный коммит", parents=[common])
+    skip_cmd = subparsers.add_parser("skip", help="skip the conflicting commit", parents=[common])
     _add_profile(skip_cmd)
     skip_cmd.set_defaults(func=cmd_skip)
 
-    abort_cmd = subparsers.add_parser("abort", help="прервать серию, откатив текущий коммит", parents=[common])
+    abort_cmd = subparsers.add_parser("abort", help="abort the series, rolling back the current commit", parents=[common])
     _add_profile(abort_cmd)
     abort_cmd.set_defaults(func=cmd_abort)
 
-    status_cmd = subparsers.add_parser("status", help="состояние незавершённого переноса", parents=[common])
+    status_cmd = subparsers.add_parser("status", help="state of an unfinished transfer", parents=[common])
     _add_profile(status_cmd)
     status_cmd.set_defaults(func=cmd_status)
 
-    cleanup = subparsers.add_parser("cleanup", help="убрать refs/xfer/* и state", parents=[common])
+    cleanup = subparsers.add_parser("cleanup", help="remove refs/xfer/* and state", parents=[common])
     _add_profile(cleanup)
-    cleanup.add_argument("--all", action="store_true", help="все refs/xfer/*, не только профиля")
-    cleanup.add_argument("--state", action="store_true", help="удалить и state-файл")
+    cleanup.add_argument("--all", action="store_true", help="all refs/xfer/*, not only the profile ones")
+    cleanup.add_argument("--state", action="store_true", help="delete the state file too")
     cleanup.set_defaults(func=cmd_cleanup)
 
     return parser
@@ -1224,7 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _log_hint() -> str:
     path = logbook.path()
-    return f"\nПодробности прогона: {path}" if path else ""
+    return f"\nRun details: {path}" if path else ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1243,7 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
         # Журнал — удобство. Что бы с ним ни случилось, работу это
         # останавливать не должно.
         logbook.disable()
-        eprint(f"git-xfer: журнал не ведётся ({exc})")
+        eprint(f"git-xfer: log is off ({exc})")
     code = EXIT_OK
     try:
         code = args.func(args)
@@ -1254,9 +1254,9 @@ def main(argv: list[str] | None = None) -> int:
         code = exc.exit_code
         return code
     except KeyboardInterrupt:
-        logbook.warn("прервано с клавиатуры")
+        logbook.warn("interrupted from the keyboard")
         eprint()
-        eprint("git-xfer: прервано")
+        eprint("git-xfer: interrupted")
         code = EXIT_INTERRUPT
         return code
     except BrokenPipeError:
@@ -1266,10 +1266,10 @@ def main(argv: list[str] | None = None) -> int:
         # Журнал заводили ровно ради таких случаев — он не должен врать,
         # что прогон закончился нулём.
         code = EXIT_GIT
-        logbook.error("непредвиденная ошибка", exc_info=True)
+        logbook.error("unexpected error", exc_info=True)
         raise
     finally:
-        logbook.info("выход с кодом %s", code)
+        logbook.info("exit code %s", code)
 
 
 if __name__ == "__main__":

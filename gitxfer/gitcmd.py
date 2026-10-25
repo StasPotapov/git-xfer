@@ -113,7 +113,7 @@ class GitResult:
     def describe(self) -> str:
         cmd = " ".join(shlex.quote(a) for a in self.args)
         tail = (self.stderr.strip() or self.stdout.strip()).strip()
-        head = f"git {cmd} → код {self.returncode}"
+        head = f"git {cmd} → exit code {self.returncode}"
         return f"{head}\n{tail}" if tail else head
 
 
@@ -192,7 +192,7 @@ class Git:
         result = GitResult(tuple(args), proc.returncode, proc.stdout, proc.stderr)
         spent = time.monotonic() - started
         logbook.debug(
-            "git %s → %d за %.2f с (%s)",
+            "git %s → %d in %.2f s (%s)",
             " ".join(shlex.quote(a) for a in args),
             result.returncode,
             spent,
@@ -208,12 +208,12 @@ class Git:
 
     def _timed_out(self, argv: Sequence[str], limit: float | None) -> GitTimeout:
         cmd = " ".join(shlex.quote(a) for a in argv)
-        logbook.error("git не уложился в %s с: %s", limit, cmd)
+        logbook.error("git timed out after %s s: %s", limit, cmd)
         return GitTimeout(
-            f"git не ответил за {limit:g} с и был прерван:\n  {cmd}\n"
-            "Обычно это значит, что он ждёт ввода (редактор, пейджер, пароль). "
-            "Потолок меняется ключом git_timeout в [defaults] конфига "
-            "(0 — без ограничения)."
+            f"git did not finish in {limit:g} s and was stopped:\n  {cmd}\n"
+            "Usually this means it is waiting for input (editor, pager, password). "
+            "Change the limit with the git_timeout key in [defaults] of the config "
+            "(0 means no limit)."
         )
 
     def out(self, *args: str, **kwargs) -> str:

@@ -222,7 +222,7 @@ def reverse_mapping(profile: Profile, state: State, warnings: list[str]) -> dict
     try:
         mapping.update(State.load(profile.source).mapping)
     except StateError as exc:
-        warnings.append(f"state источника не читается, обратный маппинг пропущен: {exc}")
+        warnings.append(f"cannot read the source state, reverse mapping skipped: {exc}")
     return mapping
 
 
