@@ -1,6 +1,6 @@
 {
   "name": "git-xfer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Move commits between two unrelated git repositories: the git-xfer CLI on the agent's PATH and a skill that drives it — dedup, conflict dry run, honest abort.",
   "author": { "name": "Stas Potapov" },
   "license": "MIT",
